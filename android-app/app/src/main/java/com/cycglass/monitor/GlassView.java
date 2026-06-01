@@ -51,6 +51,16 @@ public final class GlassView extends View {
     private float ampsIn;
     private String status = "Starting";
 
+    // Layout metrics recomputed in onSizeChanged (and again in onDraw
+    // for safety) and exposed for overlay positioning. See
+    // getBandTopPx / getBandBottomPx.
+    private int bandTopPx;
+    private int bandBottomPx;
+    private float perimeterFontPx;
+    private float perimeterLabelPx;
+    private float statusFontPx;
+    private float perimeterRowHeight;
+
     public GlassView(Context context, DataModel model, float ampsOut, float ampsIn) {
         super(context);
         this.model = model;
@@ -108,25 +118,25 @@ public final class GlassView extends View {
     }
 
     @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        recomputeBandMetrics(w, h);
+    }
+
+    @Override
     protected void onDraw(Canvas canvas) {
         int width = getWidth();
         int height = getHeight();
 
-        float bandFontPx = Math.max(48.0f, width * 0.18f);
-        // Perimeter value font: doubled from 0.085 to 0.17 of the width.
-        // Note: at this size on a phone, the unit-suffixed values like
-        // "178W" and "18.6Ah" will visually overflow into the adjacent
-        // cell. The label font is left at 0.040 so the visual hierarchy
-        // (large value, small label) still reads.
-        float perimeterFontPx = Math.max(48.0f, width * 0.17f);
-        float perimeterLabelPx = Math.max(16.0f, width * 0.040f);
-        float statusFontPx = Math.max(18.0f, width * 0.035f);
-        float statusGutterPx = statusFontPx + dp(12);
-
-        float perimeterRowHeight = perimeterFontPx + perimeterLabelPx + dp(8);
-        float bandTop = perimeterRowHeight;
-        float bandBottom = height - statusGutterPx - perimeterRowHeight;
+        // Recompute the band metrics every draw in case the view was
+        // resized (rotation, window-inset change, etc.) without an
+        // onSizeChanged callback firing. Cheap; just a few floats.
+        recomputeBandMetrics(width, height);
+        float bandTop = bandTopPx;
+        float bandBottom = bandBottomPx - perimeterRowHeight;
         float mainBandHeight = bandBottom - bandTop;
+
+        float bandFontPx = Math.max(48.0f, width * 0.18f);
         drawPerimeterRow(canvas, 0, perimeterRowHeight, width, perimeterLabelPx, perimeterFontPx, true);
         drawMainBand(canvas, bandTop, mainBandHeight, width, bandFontPx);
         drawPerimeterRow(canvas, bandBottom, perimeterRowHeight, width, perimeterLabelPx, perimeterFontPx, false);
@@ -136,6 +146,36 @@ public final class GlassView extends View {
         paint.setColor(Color.LTGRAY);
         paint.setTextAlign(Paint.Align.CENTER);
         canvas.drawText(status, width / 2.0f, height - dp(4), paint);
+    }
+
+    private void recomputeBandMetrics(int width, int height) {
+        if (width == 0 || height == 0) return;
+        float bandFontPx = Math.max(48.0f, width * 0.18f);
+        float perimeterFontPx = Math.max(48.0f, width * 0.17f);
+        float perimeterLabelPx = Math.max(16.0f, width * 0.040f);
+        float statusFontPx = Math.max(18.0f, width * 0.035f);
+        float statusGutterPx = statusFontPx + dp(12);
+
+        this.perimeterFontPx = perimeterFontPx;
+        this.perimeterLabelPx = perimeterLabelPx;
+        this.statusFontPx = statusFontPx;
+        this.perimeterRowHeight = perimeterFontPx + perimeterLabelPx + dp(8);
+        this.bandTopPx = (int) this.perimeterRowHeight;
+        this.bandBottomPx = (int) (height - statusGutterPx);
+    }
+
+    /** Y pixel where the main current band starts (bottom of the top
+     * perimeter row). Exposed so overlay widgets (settings gear, etc.)
+     * can position themselves relative to the actual band top instead
+     * of guessing a hardcoded value. */
+    public int getBandTopPx() {
+        return bandTopPx;
+    }
+
+    /** Y pixel where the main current band ends (top of the bottom
+     * perimeter row). */
+    public int getBandBottomPx() {
+        return bandBottomPx;
     }
 
     private void drawMainBand(Canvas canvas, float top, float bandHeight, int width, float fontPx) {

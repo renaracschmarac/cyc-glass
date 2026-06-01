@@ -9,6 +9,7 @@ import android.bluetooth.le.BluetoothLeScanner;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -130,22 +131,28 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         root.addView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // Settings lives in the band's top-right corner as a standard
-        // Android gear icon (ic_menu_preferences). 32 dp tap target with
-        // the system icon centered inside; the icon is white-tinted for
-        // contrast against the dark band. No text, no button background.
+        // Settings lives on the left edge of the full screen, 1/4 of
+        // the way down. Standard Android gear icon (ic_menu_preferences),
+        // 64 dp tap target, white-tinted, no button background, no text.
+        // Position is referenced from the absolute screen dimensions
+        // (not the current band or any other view-relative metric) so
+        // it stays put even when the band resizes, repaints, or fades
+        // between transparent and opaque. The left margin is half the
+        // icon width so the entire icon is visible past the screen edge.
         ImageButton settings = new ImageButton(this);
         settings.setImageResource(android.R.drawable.ic_menu_preferences);
-        settings.setImageTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
+        settings.setImageTintList(ColorStateList.valueOf(Color.WHITE));
         settings.setBackgroundColor(Color.TRANSPARENT);
         settings.setContentDescription("Settings");
         settings.setOnClickListener(v -> showCurrentSettings());
-        int bandTopPx = dp(70);  // sit just below the top perimeter row
-        int iconSize = dp(32);
+        int iconSize = dp(64);
+        android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getMetrics(metrics);
+        int screenHeight = metrics.heightPixels;
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                iconSize, iconSize, Gravity.TOP | Gravity.END);
-        params.setMargins(dp(12), bandTopPx, dp(12), 0);
-        root.addView(settings, params);
+                iconSize, iconSize, Gravity.TOP | Gravity.START);
+        params.setMargins(iconSize / 2, screenHeight / 4, 0, 0);
+        root.addView(settings);
         return root;
     }
 
