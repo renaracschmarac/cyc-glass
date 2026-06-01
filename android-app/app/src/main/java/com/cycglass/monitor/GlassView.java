@@ -147,24 +147,26 @@ public final class GlassView extends View {
         paint.setColor(Color.rgb(18, 18, 22));
         canvas.drawRect(0, rowTop, width, rowTop + rowHeight, paint);
 
-        // Four cells: get motor/battery values from the model.
+        // Four cells: get motor/battery values from the model. Units live
+        // in the labels so the value cells stay numeric and don't fight
+        // the cell width at the doubled (0.17) value font.
         String[] labels;
         String[] values;
         if (isTop) {
-            labels = new String[] { "Lev", "SPD", "V", "MOT" };
+            labels = new String[] { "Lev", "SPDmph", "V", "MOT\u00b0F" };
             values = new String[] {
                     formatInt(model.assistLevel()),
                     formatValue(model.speedMph(), "%.1f"),
                     formatValue(model.bmsVoltage(), "%.1f"),
-                    formatTempF(model.motorTempF())
+                    formatValue(model.motorTempF(), "%.0f")
             };
         } else {
-            labels = new String[] { "CTRL", "HumW", "MotW", "Cap" };
+            labels = new String[] { "CTRL\u00b0F", "HumW", "MotW", "CapAh" };
             values = new String[] {
-                    formatTempF(model.controllerTempF()),
-                    formatValue(model.humanPowerW(), "%.0fW"),
-                    formatValue(model.motorPowerW(), "%.0fW"),
-                    formatValue(model.bmsRemaining(), "%.1fAh")
+                    formatValue(model.controllerTempF(), "%.0f"),
+                    formatValue(model.humanPowerW(), "%.0f"),
+                    formatValue(model.motorPowerW(), "%.0f"),
+                    formatValue(model.bmsRemaining(), "%.1f")
             };
         }
 
@@ -224,10 +226,5 @@ public final class GlassView extends View {
     private static String formatInt(int v) {
         if (v == Integer.MIN_VALUE) return "—";
         return Integer.toString(v);
-    }
-
-    private static String formatTempF(double f) {
-        if (Double.isNaN(f)) return "—";
-        return String.format(Locale.US, "%.0f°F", f);
     }
 }
