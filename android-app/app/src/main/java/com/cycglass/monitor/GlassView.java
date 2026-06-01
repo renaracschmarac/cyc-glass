@@ -103,7 +103,12 @@ public final class GlassView extends View {
         int height = getHeight();
 
         float bandFontPx = Math.max(48.0f, width * 0.18f);
-        float perimeterFontPx = Math.max(24.0f, width * 0.085f);  // smaller so units fit in cell
+        // Perimeter value font: doubled from 0.085 to 0.17 of the width.
+        // Note: at this size on a phone, the unit-suffixed values like
+        // "178W" and "18.6Ah" will visually overflow into the adjacent
+        // cell. The label font is left at 0.040 so the visual hierarchy
+        // (large value, small label) still reads.
+        float perimeterFontPx = Math.max(48.0f, width * 0.17f);
         float perimeterLabelPx = Math.max(16.0f, width * 0.040f);
         float statusFontPx = Math.max(18.0f, width * 0.035f);
         float statusGutterPx = statusFontPx + dp(12);
