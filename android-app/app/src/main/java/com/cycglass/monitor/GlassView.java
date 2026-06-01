@@ -76,6 +76,16 @@ public final class GlassView extends View {
     }
 
     /**
+     * Test-only hook for {@link CurrentBandTest} to drive
+     * {@link #currentColor()} with a known {@code currentValue} without
+     * having to rely on field reflection (which has been unreliable in
+     * the local unit test environment with mocked double stores).
+     */
+    void setCurrentValueForTest(double value) {
+        this.currentValue = value;
+    }
+
+    /**
      * Pulls a fresh snapshot from the data model and repaints. Cheap enough
      * to call from a {@code postDelayed} poll at the desired display rate.
      */
@@ -224,10 +234,18 @@ public final class GlassView extends View {
     private int currentColor() {
         double limit = currentValue >= 0.0 ? ampsIn : ampsOut;
         float fraction = (float) Math.min(1.0, Math.abs(currentValue) / limit);
+        int baseColor;
         if (fraction <= 0.5f) {
-            return interpolateColor(ZERO_CURRENT_COLOR, MID_CURRENT_COLOR, fraction * 2.0f);
+            baseColor = interpolateColor(ZERO_CURRENT_COLOR, MID_CURRENT_COLOR, fraction * 2.0f);
+        } else {
+            baseColor = interpolateColor(MID_CURRENT_COLOR, LIMIT_CURRENT_COLOR, (fraction - 0.5f) * 2.0f);
         }
-        return interpolateColor(MID_CURRENT_COLOR, LIMIT_CURRENT_COLOR, (fraction - 0.5f) * 2.0f);
+        // Alpha scales with the same fraction: 0 A is fully transparent (so a
+        // map background beneath shows through), the configured current
+        // limit is fully opaque red. The map overlay is the planned use
+        // case — the band should be subtle at idle and pop on hard draw.
+        int alpha = Math.round(255f * fraction);
+        return (alpha << 24) | (baseColor & 0x00FFFFFF);
     }
 
     private static int interpolateColor(int start, int end, float fraction) {

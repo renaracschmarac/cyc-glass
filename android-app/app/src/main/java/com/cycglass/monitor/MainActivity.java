@@ -23,6 +23,7 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -129,18 +130,20 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         root.addView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // SETTINGS lives in the band's top-right corner, well clear of the
-        // perimeter rows. Its background is semi-transparent so the
-        // underlying band color shows through.
-        Button settings = new Button(this);
-        settings.setText("SETTINGS");
-        settings.setTextColor(Color.WHITE);
-        settings.setBackgroundColor(Color.argb(0x88, 0x00, 0x00, 0x00));
+        // Settings lives in the band's top-right corner as a standard
+        // Android gear icon (ic_menu_preferences). 32 dp tap target with
+        // the system icon centered inside; the icon is white-tinted for
+        // contrast against the dark band. No text, no button background.
+        ImageButton settings = new ImageButton(this);
+        settings.setImageResource(android.R.drawable.ic_menu_preferences);
+        settings.setImageTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
+        settings.setBackgroundColor(Color.TRANSPARENT);
+        settings.setContentDescription("Settings");
         settings.setOnClickListener(v -> showCurrentSettings());
         int bandTopPx = dp(70);  // sit just below the top perimeter row
+        int iconSize = dp(32);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.END);
+                iconSize, iconSize, Gravity.TOP | Gravity.END);
         params.setMargins(dp(12), bandTopPx, dp(12), 0);
         root.addView(settings, params);
         return root;
