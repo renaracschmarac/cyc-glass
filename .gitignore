@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+logs/
+android-app/.gradle/
+android-app/**/build/
+android-app/local.properties
+android-app/.idea/
+.idea/
+*.iml
+data/captures/
+android-app/app/src/main/assets/cyc-sample.bytesnap
+android-app/app/src/test/resources/cyc-sample.bytesnap
+.cyc-glass.local.json
