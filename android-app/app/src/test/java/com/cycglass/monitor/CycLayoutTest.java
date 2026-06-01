@@ -83,6 +83,44 @@ public class CycLayoutTest {
     }
 
     @Test
+    public void fieldsAreBigEndian() throws IOException {
+        // Regression test for the CYC wire format: every multi-byte field in
+        // the COMM_GET_VALUES response is big-endian (network order). The
+        // cygnus-bike reference decoder (scripts/cyc_telemetry.py) confirmed
+        // this against the live CYC Ride Control app. Reading little-endian
+        // produces physically impossible values (e.g. controller temp of
+        // -982 °F when the wire bytes decode to a sensible ambient value
+        // under BE). This test pins the byte order so it cannot drift back.
+        //
+        // The wire bytes below are the canonical "26.5 °C controller temp,
+        // 23.5 °C motor temp" capture from the cygnus-bike memory note of
+        // 2026-05-28. The first two bytes are 0x01 0x09 (265 big-endian →
+        // 26.5 °C), the next two are 0x00 0xEB (235 big-endian → 23.5 °C).
+        byte[] body = new byte[] {
+                0x01, 0x09,   // temp_fet_filtered = 265 → 26.5 °C
+                0x00, (byte) 0xEB,  // temp_motor_filtered = 235 → 23.5 °C
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0
+        };
+        assertEquals(26.5, layout.field("temp_fet_filtered").decode(body), 1e-9);
+        assertEquals(23.5, layout.field("temp_motor_filtered").decode(body), 1e-9);
+        // Cross-check the ASCII: under big-endian these wire bytes give a
+        // reasonable ambient/motor temp; under little-endian they would give
+        // (0x0901 = 2305 → 230.5 °C → 446.9 °F) and (0xEB00 = -5376 →
+        // -537.6 °C → -935.7 °F) — both physically impossible, exactly the
+        // symptom the user reported in the wild.
+    }
+
+    @Test
     public void layoutJsonRoundTripsFromInputStream() throws IOException {
         String json = new String(java.nio.file.Files.readAllBytes(
                 java.nio.file.Paths.get("src", "main", "assets", "cyc_uart.json")),

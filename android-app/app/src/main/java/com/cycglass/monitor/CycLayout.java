@@ -144,9 +144,16 @@ public final class CycLayout {
 
     private static long readRaw(byte[] payload, int start, int length, ValueType type) {
         long value = 0;
-        // Little-endian read.
+        // Big-endian read. The CYC controller's COMM_GET_VALUES response
+        // emits every multi-byte field (temperatures, current, voltage,
+        // speed, etc.) in network/big-endian order. This matches the
+        // CYC Ride Control Android app's decoder and the cygnus-bike
+        // reference implementation in scripts/cyc_telemetry.py. Using
+        // little-endian here yields physically impossible values (e.g.
+        // a controller temp of -982 °F when the actual wire bytes decode
+        // to a reasonable ambient value under BE).
         for (int i = 0; i < length; i++) {
-            value |= ((long) (payload[start + i] & 0xFF)) << (8 * i);
+            value = (value << 8) | (payload[start + i] & 0xFF);
         }
         return value;
     }

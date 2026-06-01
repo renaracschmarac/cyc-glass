@@ -75,36 +75,38 @@ public class VescFramingTest {
      * controller temp = 25.0 C, motor temp = 30.0 C, input V = 48.0 V,
      * motor current = 5.00 A, speed = 12.34, human power = 84 W, assist = 3.
      * All other fields are zero. The body is the 86 bytes that follow the
-     * leading VESC command byte (0x04).
+     * leading VESC command byte (0x04). Multi-byte fields are written
+     * big-endian, matching the wire format the CYC controller actually
+     * emits (and the cygnus-bike reference decoder).
      */
     static byte[] makeSyntheticTelemetry() {
         byte[] body = new byte[86];
-        // temp_fet_filtered: int16 LE, scale 10, value 25.0 C → 250
-        writeInt16(body, 0, 250);
-        // temp_motor_filtered: int16 LE, scale 10, value 30.0 C → 300
-        writeInt16(body, 2, 300);
-        // Input_V: int16 LE, scale 10, value 48.0 V → 480
-        writeInt16(body, 26, 480);
-        // reset_avg_motor_current: int32 LE, scale 100, value 5.00 A → 500
-        writeInt32(body, 4, 500);
-        // Speed: int32 LE, scale 100, value 12.34 → 1234
-        writeInt32(body, 80, 1234);
-        // Human Power: int32 LE, scale 1, value 84 W → 84
-        writeInt32(body, 76, 84);
+        // temp_fet_filtered: int16 BE, scale 10, value 25.0 C → 250
+        writeInt16BE(body, 0, 250);
+        // temp_motor_filtered: int16 BE, scale 10, value 30.0 C → 300
+        writeInt16BE(body, 2, 300);
+        // Input_V: int16 BE, scale 10, value 48.0 V → 480
+        writeInt16BE(body, 26, 480);
+        // reset_avg_motor_current: int32 BE, scale 100, value 5.00 A → 500
+        writeInt32BE(body, 4, 500);
+        // Speed: int32 BE, scale 100, value 12.34 → 1234
+        writeInt32BE(body, 80, 1234);
+        // Human Power: int32 BE, scale 1, value 84 W → 84
+        writeInt32BE(body, 76, 84);
         // Assist Level: int8, scale 1, value 3
         body[85] = 3;
         return body;
     }
 
-    private static void writeInt16(byte[] buf, int offset, int value) {
-        buf[offset] = (byte) (value & 0xFF);
-        buf[offset + 1] = (byte) ((value >> 8) & 0xFF);
+    private static void writeInt16BE(byte[] buf, int offset, int value) {
+        buf[offset] = (byte) ((value >> 8) & 0xFF);
+        buf[offset + 1] = (byte) (value & 0xFF);
     }
 
-    private static void writeInt32(byte[] buf, int offset, int value) {
-        buf[offset] = (byte) (value & 0xFF);
-        buf[offset + 1] = (byte) ((value >> 8) & 0xFF);
-        buf[offset + 2] = (byte) ((value >> 16) & 0xFF);
-        buf[offset + 3] = (byte) ((value >> 24) & 0xFF);
+    private static void writeInt32BE(byte[] buf, int offset, int value) {
+        buf[offset] = (byte) ((value >> 24) & 0xFF);
+        buf[offset + 1] = (byte) ((value >> 16) & 0xFF);
+        buf[offset + 2] = (byte) ((value >> 8) & 0xFF);
+        buf[offset + 3] = (byte) (value & 0xFF);
     }
 }

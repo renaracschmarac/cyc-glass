@@ -126,14 +126,15 @@ public final class GlassView extends View {
     private void drawMainBand(Canvas canvas, float top, float bandHeight, int width, float fontPx) {
         paint.setColor(currentColor());
         canvas.drawRect(0, top, width, top + bandHeight, paint);
+        // Simple middle section: just the number and unit, vertically
+        // centered. No label above.
         paint.setTextAlign(Paint.Align.CENTER);
-        paint.setColor(Color.LTGRAY);
-        paint.setTextSize(Math.max(20.0f, width * 0.055f));
-        canvas.drawText("CURRENT", width / 2.0f, top + bandHeight * 0.30f, paint);
         paint.setColor(Color.WHITE);
         paint.setTextSize(fontPx);
+        // Vertical center adjustment: text baseline is below the geometric
+        // center by roughly fontPx/3.
         canvas.drawText(formatValue(current, "%.1f A"),
-                width / 2.0f, top + bandHeight * 0.72f, paint);
+                width / 2.0f, top + bandHeight / 2.0f + fontPx / 3.0f, paint);
     }
 
     private void drawPerimeterRow(Canvas canvas, float rowTop, float rowHeight, int width,
