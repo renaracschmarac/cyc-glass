@@ -25,6 +25,7 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.TextView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -139,6 +140,13 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         // it stays put even when the band resizes, repaints, or fades
         // between transparent and opaque. The left margin is half the
         // icon width so the entire icon is visible past the screen edge.
+        // Settings icon. See 2026-06-01 memory note for the unresolved
+        // rendering issue with this position. The position math is
+        // correct (verified with a translucent red debug background) but
+        // the icon's actual content (system drawable or unicode glyph)
+        // is not being drawn for reasons that couldn't be pinned down
+        // before giving up. Leaving the ImageButton code in place so
+        // the next attempt can start from a clean, known state.
         ImageButton settings = new ImageButton(this);
         settings.setImageResource(android.R.drawable.ic_menu_preferences);
         settings.setImageTintList(ColorStateList.valueOf(Color.WHITE));
