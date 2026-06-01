@@ -9,14 +9,11 @@ import android.bluetooth.le.BluetoothLeScanner;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.content.res.ColorStateList;
-import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -24,7 +21,6 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -131,36 +127,13 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         FrameLayout root = new FrameLayout(this);
         root.addView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        // Settings lives on the left edge of the full screen, 1/4 of
-        // the way down. Standard Android gear icon (ic_menu_preferences),
-        // 64 dp tap target, white-tinted, no button background, no text.
-        // Position is referenced from the absolute screen dimensions
-        // (not the current band or any other view-relative metric) so
-        // it stays put even when the band resizes, repaints, or fades
-        // between transparent and opaque. The left margin is half the
-        // icon width so the entire icon is visible past the screen edge.
-        // Settings icon. See 2026-06-01 memory note for the unresolved
-        // rendering issue with this position. The position math is
-        // correct (verified with a translucent red debug background) but
-        // the icon's actual content (system drawable or unicode glyph)
-        // is not being drawn for reasons that couldn't be pinned down
-        // before giving up. Leaving the ImageButton code in place so
-        // the next attempt can start from a clean, known state.
-        ImageButton settings = new ImageButton(this);
-        settings.setImageResource(android.R.drawable.ic_menu_preferences);
-        settings.setImageTintList(ColorStateList.valueOf(Color.WHITE));
-        settings.setBackgroundColor(Color.TRANSPARENT);
-        settings.setContentDescription("Settings");
-        settings.setOnClickListener(v -> showCurrentSettings());
-        int iconSize = dp(64);
-        android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
-        getWindowManager().getDefaultDisplay().getMetrics(metrics);
-        int screenHeight = metrics.heightPixels;
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                iconSize, iconSize, Gravity.TOP | Gravity.START);
-        params.setMargins(iconSize / 2, screenHeight / 4, 0, 0);
-        root.addView(settings);
+        // The settings gear is drawn directly inside the GlassView's
+        // own onDraw (see GlassView.drawSettingsIcon), so a sibling
+        // ImageButton isn't needed — the previous sibling-View path
+        // failed to render the icon content on this device. Tap
+        // detection is handled by GlassView.onTouchEvent, which calls
+        // back into showCurrentSettings() via the listener set below.
+        view.setOnSettingsTapListener(() -> showCurrentSettings());
         return root;
     }
 

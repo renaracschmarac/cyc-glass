@@ -4,7 +4,10 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.view.MotionEvent;
 import android.view.View;
 
 import java.util.Locale;
@@ -61,13 +64,36 @@ public final class GlassView extends View {
     private float statusFontPx;
     private float perimeterRowHeight;
 
+    // Settings gear icon. The icon is drawn directly in onDraw (the
+    // FrameLayout / ImageButton path failed to render the icon content
+    // on this device — see the 2026-06-01 memory note). Tap detection
+    // is also handled here, via a hit-test against the icon's rect.
+    private final Paint gearPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint gearHolePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF settingsIconRect = new RectF();
+    private Runnable onSettingsTapListener;
+
     public GlassView(Context context, DataModel model, float ampsOut, float ampsIn) {
         super(context);
         this.model = model;
         this.ampsOut = ampsOut;
         this.ampsIn = ampsIn;
         paint.setTypeface(Typeface.create("sans", Typeface.BOLD));
+        // Settings gear icon paints.
+        gearPaint.setColor(Color.WHITE);
+        gearPaint.setStyle(Paint.Style.FILL);
+        gearHolePaint.setColor(Color.BLACK);
+        gearHolePaint.setStyle(Paint.Style.FILL);
         setContentDescription(buildDescription());
+    }
+
+    /**
+     * Sets the listener invoked when the user taps the settings gear
+     * icon drawn in the top-right of the main band. Pass {@code null}
+     * to clear.
+     */
+    public void setOnSettingsTapListener(Runnable listener) {
+        this.onSettingsTapListener = listener;
     }
 
     public void setStatus(String value) {
@@ -140,6 +166,7 @@ public final class GlassView extends View {
         drawPerimeterRow(canvas, 0, perimeterRowHeight, width, perimeterLabelPx, perimeterFontPx, true);
         drawMainBand(canvas, bandTop, mainBandHeight, width, bandFontPx);
         drawPerimeterRow(canvas, bandBottom, perimeterRowHeight, width, perimeterLabelPx, perimeterFontPx, false);
+        drawSettingsIcon(canvas, width);
 
         // Status line in the gutter below the bottom row.
         paint.setTextSize(statusFontPx);
@@ -162,6 +189,16 @@ public final class GlassView extends View {
         this.perimeterRowHeight = perimeterFontPx + perimeterLabelPx + dp(8);
         this.bandTopPx = (int) this.perimeterRowHeight;
         this.bandBottomPx = (int) (height - statusGutterPx);
+
+        // Settings gear icon: tucked into the top-right corner of the
+        // main band, just below the top perimeter row. Tap target is
+        // 64dp wide (Android accessibility floor); visual gear is 48dp.
+        float tapRadius = dp(32);
+        float rightMargin = dp(20);
+        float topMargin = dp(12);
+        float cx = width - rightMargin - tapRadius;
+        float cy = this.bandTopPx + topMargin + tapRadius;
+        settingsIconRect.set(cx - tapRadius, cy - tapRadius, cx + tapRadius, cy + tapRadius);
     }
 
     /** Y pixel where the main current band starts (bottom of the top
@@ -301,6 +338,83 @@ public final class GlassView extends View {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    /**
+     * Renders the white settings gear at the location computed by
+     * {@link #recomputeBandMetrics}. The icon is drawn here, in the
+     * view's own onDraw, rather than as a sibling View in the parent
+     * FrameLayout — see the 2026-06-01 memory note for why the
+     * sibling-View path was unreliable on this device.
+     */
+    private void drawSettingsIcon(Canvas canvas, int width) {
+        float visualRadius = dp(24);
+        float cx = (settingsIconRect.left + settingsIconRect.right) / 2f;
+        float cy = (settingsIconRect.top + settingsIconRect.bottom) / 2f;
+        Path gear = buildGearPath(cx, cy, visualRadius, visualRadius * 0.75f, 8);
+        canvas.drawPath(gear, gearPaint);
+        // Center hole in the band color so the gear reads as a gear
+        // and not a solid disc.
+        gearHolePaint.setColor(currentColor());
+        canvas.drawCircle(cx, cy, visualRadius * 0.35f, gearHolePaint);
+    }
+
+    /**
+     * Builds an N-toothed gear {@link Path} centered at {@code (cx, cy)}
+     * with outer radius {@code outerR} and inner (gap) radius
+     * {@code innerR}. Each tooth spans half of its allotted angular
+     * step, with the gap filling the other half.
+     */
+    private static Path buildGearPath(float cx, float cy, float outerR, float innerR, int teeth) {
+        Path path = new Path();
+        float stepAngle = (float) (Math.PI * 2.0 / teeth);
+        float halfTooth = stepAngle * 0.25f;  // tooth occupies half the step
+        for (int i = 0; i < teeth; i++) {
+            float center = i * stepAngle;
+            float a1 = center - halfTooth;   // outer-left of this tooth
+            float a2 = center + halfTooth;   // outer-right of this tooth
+            float a3 = center + stepAngle - halfTooth;  // start of next outer (end of this gap)
+            float x1 = cx + outerR * (float) Math.cos(a1);
+            float y1 = cy + outerR * (float) Math.sin(a1);
+            float x2 = cx + outerR * (float) Math.cos(a2);
+            float y2 = cy + outerR * (float) Math.sin(a2);
+            float x3 = cx + innerR * (float) Math.cos(a2);
+            float y3 = cy + innerR * (float) Math.sin(a2);
+            float x4 = cx + innerR * (float) Math.cos(a3);
+            float y4 = cy + innerR * (float) Math.sin(a3);
+            if (i == 0) {
+                path.moveTo(x1, y1);
+            } else {
+                path.lineTo(x1, y1);
+            }
+            path.lineTo(x2, y2);
+            path.lineTo(x3, y3);
+            path.lineTo(x4, y4);
+        }
+        path.close();
+        return path;
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        // Claim the gesture on ACTION_DOWN if the touch lands on the
+        // settings icon, otherwise return false so the framework can
+        // route the event to other potential consumers. Without the
+        // ACTION_DOWN claim, the framework stops delivering
+        // subsequent events (including ACTION_UP) to this view, so
+        // the tap would never fire.
+        boolean inIcon = settingsIconRect.contains(event.getX(), event.getY());
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                return inIcon;
+            case MotionEvent.ACTION_UP:
+                if (inIcon && onSettingsTapListener != null) {
+                    onSettingsTapListener.run();
+                }
+                return inIcon;
+            default:
+                return super.onTouchEvent(event);
+        }
     }
 
     private static String formatValue(double v, String fmt) {
