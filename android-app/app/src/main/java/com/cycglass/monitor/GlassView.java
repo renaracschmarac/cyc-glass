@@ -148,12 +148,14 @@ public final class GlassView extends View {
         canvas.drawRect(0, rowTop, width, rowTop + rowHeight, paint);
 
         // Four cells: get motor/battery values from the model. Units live
-        // in the labels so the value cells stay numeric and don't fight
-        // the cell width at the doubled (0.17) value font.
+        // in the labels so the value cells stay numeric. All value strings
+        // use at most one decimal place ("%.0f" or "%.1f") so the longest
+        // expected value is 4 characters (e.g. "55.5", "2000", "18.6"),
+        // which gives auto-fit room to land somewhere reasonable per cell.
         String[] labels;
         String[] values;
         if (isTop) {
-            labels = new String[] { "Lev", "SPDmph", "V", "MOT\u00b0F" };
+            labels = new String[] { "Lev", "mph", "V", "MOT\u00b0F" };
             values = new String[] {
                     formatInt(model.assistLevel()),
                     formatValue(model.speedMph(), "%.1f"),
@@ -171,27 +173,52 @@ public final class GlassView extends View {
         }
 
         float cellWidth = width / 4.0f;
+        float maxValueWidth = cellWidth * 0.95f;  // 5% combined side padding
         paint.setTextAlign(Paint.Align.CENTER);
         for (int i = 0; i < 4; i++) {
             float cx = cellWidth * (i + 0.5f);
-            paint.setColor(Color.LTGRAY);
-            paint.setTextSize(labelPx);
+            // Auto-fit: shrink the value font for this cell until the text
+            // fits within maxValueWidth. The label keeps the shared labelPx
+            // because labels are short and consistent across the row.
+            float fittedValuePx = fitFontSize(values[i], valuePx, maxValueWidth, paint);
             if (isTop) {
-                canvas.drawText(labels[i], cx, rowTop + labelPx + dp(2), paint);
-                paint.setColor(Color.WHITE);
-                paint.setTextSize(valuePx);
-                canvas.drawText(values[i], cx, rowTop + labelPx + valuePx + dp(2), paint);
-            } else {
-                // Bottom row: draw label and value stacked, value just above
-                // the label, so the band hugs the top of the row.
-                paint.setColor(Color.WHITE);
-                paint.setTextSize(valuePx);
-                canvas.drawText(values[i], cx, rowTop + valuePx + dp(2), paint);
                 paint.setColor(Color.LTGRAY);
                 paint.setTextSize(labelPx);
-                canvas.drawText(labels[i], cx, rowTop + valuePx + labelPx + dp(6), paint);
+                canvas.drawText(labels[i], cx, rowTop + labelPx + dp(2), paint);
+                paint.setColor(Color.WHITE);
+                paint.setTextSize(fittedValuePx);
+                canvas.drawText(values[i], cx, rowTop + labelPx + fittedValuePx + dp(2), paint);
+            } else {
+                // Bottom row: value above, label below.
+                paint.setColor(Color.WHITE);
+                paint.setTextSize(fittedValuePx);
+                canvas.drawText(values[i], cx, rowTop + fittedValuePx + dp(2), paint);
+                paint.setColor(Color.LTGRAY);
+                paint.setTextSize(labelPx);
+                canvas.drawText(labels[i], cx, rowTop + fittedValuePx + labelPx + dp(6), paint);
             }
         }
+    }
+
+    /**
+     * Picks the largest font size, in pixels, at which {@code text} fits
+     * within {@code maxWidth} on the given {@code paint}. Starts from
+     * {@code startSize} and multiplies by 0.9 until the text fits or the
+     * size drops below 8 px (the floor below which a value becomes
+     * unreadable; in practice the loop converges well before that).
+     *
+     * <p>Side effect: the caller's {@code paint} is left with the chosen
+     * {@code TextSize} set, so callers can use {@code paint.measureText()}
+     * or call {@code canvas.drawText(..., paint)} immediately afterwards.
+     */
+    static float fitFontSize(String text, float startSize, float maxWidth, Paint paint) {
+        float size = startSize;
+        paint.setTextSize(size);
+        while (paint.measureText(text) > maxWidth && size > 8.0f) {
+            size *= 0.9f;
+            paint.setTextSize(size);
+        }
+        return size;
     }
 
     private int currentColor() {
