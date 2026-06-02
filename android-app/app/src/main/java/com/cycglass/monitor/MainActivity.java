@@ -360,6 +360,7 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         correctLabel.setText("Correct");
         correctLabel.setMaxLines(1);
         correctLabel.setSingleLine(true);
+        correctLabel.setGravity(Gravity.END);
         LinearLayout.LayoutParams leftLabelParams =
                 new LinearLayout.LayoutParams(0,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
