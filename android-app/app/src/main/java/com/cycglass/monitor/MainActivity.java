@@ -353,7 +353,7 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         LinearLayout labelRow = new LinearLayout(this);
         labelRow.setOrientation(LinearLayout.HORIZONTAL);
         TextView metricLabel = new TextView(this);
-        metricLabel.setText("Metric (commie)");
+        metricLabel.setText("Commie");
         metricLabel.setMaxLines(1);
         metricLabel.setSingleLine(true);
         TextView correctLabel = new TextView(this);

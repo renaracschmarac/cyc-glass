@@ -386,8 +386,18 @@ public final class CycClient {
         // Electrical input power: V * A. scale of voltage = 10, scale of
         // current = 100, so product is in (V*100)*(A*100)/10000 = W.
         double motorPowerW = voltage * motorCurrent;
-        int assist = (int) Math.round(assistLevel);
+        int assist = displayAssistLevel((int) Math.round(assistLevel));
         model.setMotorMetrics(assist, speedMph, motorTempF, controllerTempF, humanPower, motorPowerW);
+    }
+
+    static int displayAssistLevel(int rawAssistLevel) {
+        switch (rawAssistLevel) {
+            case 0: return 0;
+            case 3: return 1;
+            case 6: return 2;
+            case 9: return 3;
+            default: return rawAssistLevel;
+        }
     }
 
     private static double celsiusToFahrenheit(double celsius) {
