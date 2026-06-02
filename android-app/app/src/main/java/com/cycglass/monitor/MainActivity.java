@@ -64,6 +64,7 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     private GlassView view;
     private MapBackgroundView mapView;
     private LocationProvider locationProvider;
+    private OrientationProvider orientationProvider;
     private String lastBaseStatus = "Starting";
     private BluetoothAdapter adapter;
     private BluetoothLeScanner scanner;
@@ -179,6 +180,19 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
             }
         });
 
+        // Orientation provider. Started in onResume (alongside the
+        // location provider); the listener just forwards heading
+        // changes to the map. The map is in heading-up mode: the
+        // screen's "up" follows the direction the top of the phone
+        // is pointing. We attach the listener unconditionally; if
+        // the device has no rotation vector sensor, isAvailable()
+        // is false and start() is a no-op (we just never receive
+        // any onHeading callbacks).
+        orientationProvider = new OrientationProvider(this);
+        orientationProvider.addListener((degreesFromNorth, timestampMs) -> {
+            if (mapView != null) mapView.setHeading(degreesFromNorth);
+        });
+
         startWhenPermitted();
     }
 
@@ -190,12 +204,14 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
                 && locationProvider.hasFineLocationPermission()) {
             locationProvider.start();
         }
+        if (orientationProvider != null) orientationProvider.start();
     }
 
     @Override
     protected void onPause() {
         handler.removeCallbacks(refreshView);
         if (locationProvider != null) locationProvider.stop();
+        if (orientationProvider != null) orientationProvider.stop();
         super.onPause();
     }
 
@@ -205,6 +221,7 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         if (bmsClient != null) bmsClient.stop();
         if (cycClient != null) cycClient.stop();
         if (locationProvider != null) locationProvider.stop();
+        if (orientationProvider != null) orientationProvider.stop();
         super.onDestroy();
     }
 

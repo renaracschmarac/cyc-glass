@@ -108,6 +108,22 @@ public final class MapBackgroundView extends MapView {
     }
 
     /**
+     * Sets the heading of the map. The map is rotated around the
+     * screen center (which is the GPS location) by {@code -degrees}
+     * — osmdroid's rotation is clockwise-positive, so we negate to
+     * keep the user's forward direction at the top of the screen.
+     *
+     * <p>Callers (the {@code OrientationProvider} listener) are
+     * expected to invoke this on the main thread.
+     *
+     * @param degrees heading in degrees from magnetic north,
+     *               normalized to [0, 360)
+     */
+    public void setHeading(float degrees) {
+        setMapOrientation(-degrees);
+    }
+
+    /**
      * Sets the initial center if we don't yet have one, OR animates to
      * the given center if we already do. Safe to call multiple times.
      *
