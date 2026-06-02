@@ -61,6 +61,10 @@ public final class GlassView extends View {
     // Visual constants for the speed sign and center arrow.
     // Material Blue 700.
     private static final int CENTER_ARROW_BLUE = 0xFF1976D2;
+    // Vienna Convention sign red (≈ Pantone 199 C, the
+    // official traffic red used on EU road signs). Full
+    // alpha so the sign reads as a flat painted disc.
+    private static final int SPEED_SIGN_RED = 0xFFC8102E;
 
     // Layout metrics recomputed in onSizeChanged (and again in onDraw
     // for safety) and exposed for overlay positioning. See
@@ -217,15 +221,17 @@ public final class GlassView extends View {
         float cy = this.bandTopPx + topMargin + tapRadius;
         settingsIconRect.set(cx - tapRadius, cy - tapRadius, cx + tapRadius, cy + tapRadius);
 
-        // Speed sign: 80 dp tall × 64 dp wide, centered on the
-        // gear's X, 16 dp below the gear's visual bottom edge. The
-        // US MUTCD rectangle is taller than wide.
-        float signWidth = dp(64);
-        float signHeight = dp(80);
+        // Speed sign: a 72 dp diameter disc (the EU Vienna
+        // speed-limit sign convention: red ring, white
+        // interior, black numerals, no unit). Bounding box
+        // is square, centered on the gear's X, 16 dp below
+        // the gear's visual bottom edge — same vertical
+        // relationship as the MUTCD rectangle it replaces.
+        float signSize = dp(72);
         float signCx = cx;  // same column as the gear center
         float signTop = this.bandTopPx + dp(84);
-        speedSignRect.set(signCx - signWidth / 2f, signTop,
-                signCx + signWidth / 2f, signTop + signHeight);
+        speedSignRect.set(signCx - signSize / 2f, signTop,
+                signCx + signSize / 2f, signTop + signSize);
 
         // Center arrow: chevron tip at (width/2, height/2 - 30dp),
         // base at (width/2 ± 16dp, height/2 - 6dp). The dot sits at
@@ -405,42 +411,51 @@ public final class GlassView extends View {
     }
 
     /**
-     * Renders the US MUTCD-style speed sign directly below the
-     * settings gear. White interior, 3 dp black border, integer
-     * mph in sans-serif bold black, no unit label. The numeral
-     * auto-fits the rectangle width — a 3-digit value (100+) is
-     * still readable at 64 dp wide.
+     * Renders the EU Vienna Convention speed sign directly
+     * below the settings gear. White interior with a red
+     * ring (≈ 8% of the diameter — the sign convention),
+     * integer mph in sans-serif bold black, no unit label.
+     * The numeral auto-fits the inner-white diameter so a
+     * 3-digit value (100+) is still readable.
      */
     private void drawSpeedSign(Canvas canvas, int width) {
+        float cx = (speedSignRect.left + speedSignRect.right) / 2f;
+        float cy = (speedSignRect.top + speedSignRect.bottom) / 2f;
+        float radius = speedSignRect.width() / 2f;
+        float ringWidth = dp(6);
+
         // White interior. We use the shared `paint` for fill /
         // stroke and reset its state when done.
         paint.setColor(Color.WHITE);
         paint.setStyle(Paint.Style.FILL);
-        canvas.drawRect(speedSignRect, paint);
+        canvas.drawCircle(cx, cy, radius, paint);
 
-        // 3 dp black border.
+        // Red ring. Drawn as a stroke on a circle inset by
+        // ringWidth/2 from the outer edge, so the ring sits
+        // flush with the white interior and the visible red
+        // band has the requested thickness.
+        paint.setColor(SPEED_SIGN_RED);
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(dp(3));
-        paint.setColor(Color.BLACK);
-        canvas.drawRect(speedSignRect, paint);
+        paint.setStrokeWidth(ringWidth);
+        canvas.drawCircle(cx, cy, radius - ringWidth / 2f, paint);
         paint.setStyle(Paint.Style.FILL);
 
-        // Speed text. Integer mph, no unit label, em-dash when no
-        // GPS fix has reported speed yet.
+        // Speed text. Integer mph, no unit label, em-dash when
+        // no GPS fix has reported speed yet.
         String text = Double.isNaN(gpsSpeedMph)
                 ? "\u2014"
                 : Integer.toString((int) Math.round(gpsSpeedMph));
         paint.setColor(Color.BLACK);
         paint.setTextAlign(Paint.Align.CENTER);
-        // Start at ~48 dp; auto-fit down if the text overflows.
+        // Start at ~48 dp; auto-fit down if the text overflows
+        // the white interior.
         float startFontPx = Math.max(36.0f, dp(48));
+        float innerDiameter = (radius - ringWidth) * 2f;
         float fitted = fitFontSize(text, startFontPx,
-                speedSignRect.width() * 0.85f, paint);
+                innerDiameter * 0.85f, paint);
         paint.setTextSize(fitted);
-        float cx = (speedSignRect.left + speedSignRect.right) / 2f;
-        float cy = (speedSignRect.top + speedSignRect.bottom) / 2f;
         // Vertical center adjustment: text baseline is below the
-        // geometric center by roughly fontPx/3.
+        // geometric center by roughly fitted/3.
         canvas.drawText(text, cx, cy + fitted / 3f, paint);
     }
 
