@@ -1,0 +1,57 @@
+name: Android release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, for example v0.3.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-apk:
+    name: Build and upload release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Test and build APK
+        working-directory: android-app
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+
+      - name: Prepare APK asset
+        run: |
+          cp android-app/app/build/outputs/apk/debug/app-debug.apk "cyc-glass-${{ inputs.tag }}.apk"
+
+      - name: Upload APK to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.tag }}" "cyc-glass-${{ inputs.tag }}.apk" \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyc-glass-${{ inputs.tag }}-apk
+          path: cyc-glass-${{ inputs.tag }}.apk
