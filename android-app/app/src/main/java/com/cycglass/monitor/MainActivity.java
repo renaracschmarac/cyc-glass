@@ -15,6 +15,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.preference.PreferenceManager;
 import android.text.InputType;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -23,8 +24,6 @@ import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -335,40 +334,67 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         EditText ampsOut = currentField("Amps OUT (-)", view.getAmpsOut());
         EditText ampsIn = currentField("Amps IN (+)", view.getAmpsIn());
 
-        // Unit-system toggle: two radio buttons, picked to match
-        // the saved preference (or Imperial by default). The sign
-        // shape (US MUTCD vs EU Vienna) is implied by the
-        // selected unit system, so we don't need a separate
-        // control for it. Built as a labeled view group because
-        // labeledField() is typed for EditText.
+        // Unit-system toggle: a two-color slide switch with
+        // "Metric (commie)" on the left (red half) and
+        // "Correct" on the right (green half). The switch's
+        // checked state maps to Imperial (the user can see
+        // the sign flip to the US MUTCD rectangle as the
+        // thumb slides right). State is applied immediately
+        // on toggle (model + view + SharedPreferences) so
+        // the sign shape animates along with the thumb;
+        // Save only commits the amps fields below.
         LinearLayout unitsGroup = new LinearLayout(this);
         unitsGroup.setOrientation(LinearLayout.VERTICAL);
-        TextView unitsLabel = new TextView(this);
-        unitsLabel.setText("Units (also changes the speed sign shape)");
-        unitsGroup.addView(unitsLabel);
-        RadioGroup unitsRadios = new RadioGroup(this);
-        unitsRadios.setOrientation(RadioGroup.HORIZONTAL);
-        RadioButton imperialBtn = new RadioButton(this);
-        imperialBtn.setId(View.generateViewId());
-        imperialBtn.setText("Imperial (mph, \u00b0F)");
-        unitsRadios.addView(imperialBtn);
-        RadioButton metricBtn = new RadioButton(this);
-        metricBtn.setId(View.generateViewId());
-        metricBtn.setText("Metric (kph, \u00b0C)");
-        unitsRadios.addView(metricBtn);
-        if (model.unitSystem() == UnitSystem.IMPERIAL) {
-            unitsRadios.check(imperialBtn.getId());
-        } else {
-            unitsRadios.check(metricBtn.getId());
-        }
-        unitsGroup.addView(unitsRadios);
+
+        // Label row: "Metric (commie)" left-aligned,
+        // "Correct" right-aligned, sitting above the switch.
+        // Each label is single-line so the row's height is
+        // one text line and the switch sits directly below.
+        LinearLayout labelRow = new LinearLayout(this);
+        labelRow.setOrientation(LinearLayout.HORIZONTAL);
+        TextView metricLabel = new TextView(this);
+        metricLabel.setText("Metric (commie)");
+        metricLabel.setMaxLines(1);
+        metricLabel.setSingleLine(true);
+        TextView correctLabel = new TextView(this);
+        correctLabel.setText("Correct");
+        correctLabel.setMaxLines(1);
+        correctLabel.setSingleLine(true);
+        LinearLayout.LayoutParams leftLabelParams =
+                new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        leftLabelParams.gravity = Gravity.START;
+        metricLabel.setLayoutParams(leftLabelParams);
+        LinearLayout.LayoutParams rightLabelParams =
+                new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        rightLabelParams.gravity = Gravity.END;
+        correctLabel.setLayoutParams(rightLabelParams);
+        labelRow.addView(metricLabel);
+        labelRow.addView(correctLabel);
+        unitsGroup.addView(labelRow);
+
+        // Two-color split slide switch.
+        UnitSwitch unitSwitch = new UnitSwitch(this);
+        unitSwitch.setChecked(model.unitSystem() == UnitSystem.IMPERIAL);
+        unitSwitch.setOnCheckedChangeListener((v, isChecked) -> {
+            UnitSystem picked = isChecked
+                    ? UnitSystem.IMPERIAL
+                    : UnitSystem.METRIC;
+            model.setUnitSystem(picked);
+            view.setUnitSystem(picked);
+            preferences.edit()
+                    .putString(KEY_UNITS, picked.name())
+                    .apply();
+        });
+        unitsGroup.addView(unitSwitch);
         fields.addView(unitsGroup);
         fields.addView(labeledField("Bright red at Amps OUT (-)", ampsOut));
         fields.addView(labeledField("Bright red at Amps IN (+)", ampsIn));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Current Color Scale")
-                .setMessage("The Current band is green at 0 A, yellow at half scale, and red at either limit.")
+                .setTitle("Config")
+                .setMessage("")
                 .setView(fields)
                 .setNegativeButton("Cancel", null)
                 .setNeutralButton("Re-scan for battery", null)
@@ -385,19 +411,13 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
                     float out = Float.parseFloat(ampsOut.getText().toString().trim());
                     float in = Float.parseFloat(ampsIn.getText().toString().trim());
                     if (out <= 0.0f || in <= 0.0f) throw new NumberFormatException();
-                    // Units: read the checked radio, default to
-                    // Imperial if neither (shouldn't happen — a
-                    // radio group always has a selection).
-                    UnitSystem picked = unitsRadios.getCheckedRadioButtonId() == metricBtn.getId()
-                            ? UnitSystem.METRIC
-                            : UnitSystem.IMPERIAL;
+                    // Unit system was applied on every toggle of
+                    // the slide switch (see the listener above);
+                    // Save just commits the amps fields.
                     preferences.edit()
                             .putFloat(KEY_AMPS_OUT, out)
                             .putFloat(KEY_AMPS_IN, in)
-                            .putString(KEY_UNITS, picked.name())
                             .apply();
-                    model.setUnitSystem(picked);
-                    view.setUnitSystem(picked);
                     view.setCurrentScale(out, in);
                     ad.dismiss();
                 } catch (NumberFormatException error) {
