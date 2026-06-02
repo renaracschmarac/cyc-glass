@@ -49,6 +49,12 @@ public final class DataModel {
         return metersPerSecond * 2.2369362920544;
     }
 
+    /** Kilometers per hour to miles per hour. Exact constant
+     * from NIST: 1 km/h = 1/1.609344 mph. */
+    public static double kphToMph(double kilometersPerHour) {
+        return kilometersPerHour * 0.62137119223733;
+    }
+
     public synchronized void setBmsMetrics(double voltage, double current, double remaining) {
         this.bmsVoltage = voltage;
         this.bmsCurrent = current;

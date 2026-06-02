@@ -73,6 +73,38 @@ public class DataModelLocationTest {
     }
 
     @Test
+    public void kphToMphAtZero() {
+        assertEquals(0.0, DataModel.kphToMph(0.0), 0.0001);
+    }
+
+    @Test
+    public void kphToMphAtCommonBikingSpeed() {
+        // 25 km/h ≈ 15.53 mph (typical urban cycling / slow ebike)
+        assertEquals(15.534, DataModel.kphToMph(25.0), 0.001);
+    }
+
+    @Test
+    public void kphToMphScalesLinearly() {
+        // 2× the kph should give 2× the mph.
+        double one = DataModel.kphToMph(15.0);
+        double two = DataModel.kphToMph(30.0);
+        assertEquals(2.0 * one, two, 0.0001);
+    }
+
+    @Test
+    public void kphToMphAndMpsToMphAgreeAtCommonSpeed() {
+        // Sanity: 1 m/s ≈ 3.6 km/h, so a single physical speed
+        // expressed in m/s and km/h should round-trip through both
+        // conversions to the same mph.
+        double speedMps = 5.0;
+        double speedKph = speedMps * 3.6;  // exact
+        assertEquals(
+                DataModel.mpsToMph(speedMps),
+                DataModel.kphToMph(speedKph),
+                0.0001);
+    }
+
+    @Test
     public void mpsToMphAtOneMps() {
         // 1 m/s = 1 / 0.44704 mph ≈ 2.236936 mph
         assertEquals(2.236936, DataModel.mpsToMph(1.0), 0.0001);

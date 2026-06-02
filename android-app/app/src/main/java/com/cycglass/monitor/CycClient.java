@@ -375,10 +375,12 @@ public final class CycClient {
         double speed = layout.field("Speed").decode(telemetry);
         double humanPower = layout.field("Human Power").decode(telemetry);
         double assistLevel = layout.field("Assist Level").decode(telemetry);
-        // CYC returns Speed scaled by 100; cyc_uart.json says "scale": 100 and
-        // cygnus-bike notes the units are mph once the app is in imperial mode.
-        // (See the cyc-protocol-notes for the ODO/speed unit decision.)
-        double speedMph = speed;
+        // The X1 Pro Gen4 controller emits the Speed field in km/h on
+        // the wire regardless of the CYC app's display-unit setting;
+        // the CYC phone app does the km/h → mph conversion when the
+        // user picks imperial. We have to do the same. See
+        // data/SOURCE.md "Speed unit" for the live-packet analysis.
+        double speedMph = DataModel.kphToMph(speed);
         double motorTempF = celsiusToFahrenheit(motorTempC);
         double controllerTempF = celsiusToFahrenheit(controllerTempC);
         // Electrical input power: V * A. scale of voltage = 10, scale of
