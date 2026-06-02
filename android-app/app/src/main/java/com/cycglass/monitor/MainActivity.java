@@ -23,6 +23,8 @@ import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -44,6 +46,7 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     private static final String SETTINGS_NAME = "display_settings";
     private static final String KEY_AMPS_OUT = "amps_out";
     private static final String KEY_AMPS_IN = "amps_in";
+    private static final String KEY_UNITS = "units_system";
     private static final String KEY_LAST_KNOWN_LAT = "last_known_lat";
     private static final String KEY_LAST_KNOWN_LON = "last_known_lon";
     private static final String KEY_LAST_KNOWN_FIX_MS = "last_known_fix_ms";
@@ -111,6 +114,8 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         preferences = getSharedPreferences(SETTINGS_NAME, MODE_PRIVATE);
         float ampsOut = Math.abs(preferences.getFloat(KEY_AMPS_OUT, DEFAULT_AMPS_OUT));
         float ampsIn = Math.abs(preferences.getFloat(KEY_AMPS_IN, DEFAULT_AMPS_IN));
+        UnitSystem unitSystem = readUnitSystem(preferences);
+        model.setUnitSystem(unitSystem);
 
         try {
             layout = CycClient.loadLayoutFromAssets(this);
@@ -329,6 +334,35 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
 
         EditText ampsOut = currentField("Amps OUT (-)", view.getAmpsOut());
         EditText ampsIn = currentField("Amps IN (+)", view.getAmpsIn());
+
+        // Unit-system toggle: two radio buttons, picked to match
+        // the saved preference (or Imperial by default). The sign
+        // shape (US MUTCD vs EU Vienna) is implied by the
+        // selected unit system, so we don't need a separate
+        // control for it. Built as a labeled view group because
+        // labeledField() is typed for EditText.
+        LinearLayout unitsGroup = new LinearLayout(this);
+        unitsGroup.setOrientation(LinearLayout.VERTICAL);
+        TextView unitsLabel = new TextView(this);
+        unitsLabel.setText("Units (also changes the speed sign shape)");
+        unitsGroup.addView(unitsLabel);
+        RadioGroup unitsRadios = new RadioGroup(this);
+        unitsRadios.setOrientation(RadioGroup.HORIZONTAL);
+        RadioButton imperialBtn = new RadioButton(this);
+        imperialBtn.setId(View.generateViewId());
+        imperialBtn.setText("Imperial (mph, \u00b0F)");
+        unitsRadios.addView(imperialBtn);
+        RadioButton metricBtn = new RadioButton(this);
+        metricBtn.setId(View.generateViewId());
+        metricBtn.setText("Metric (kph, \u00b0C)");
+        unitsRadios.addView(metricBtn);
+        if (model.unitSystem() == UnitSystem.IMPERIAL) {
+            unitsRadios.check(imperialBtn.getId());
+        } else {
+            unitsRadios.check(metricBtn.getId());
+        }
+        unitsGroup.addView(unitsRadios);
+        fields.addView(unitsGroup);
         fields.addView(labeledField("Bright red at Amps OUT (-)", ampsOut));
         fields.addView(labeledField("Bright red at Amps IN (+)", ampsIn));
 
@@ -351,10 +385,19 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
                     float out = Float.parseFloat(ampsOut.getText().toString().trim());
                     float in = Float.parseFloat(ampsIn.getText().toString().trim());
                     if (out <= 0.0f || in <= 0.0f) throw new NumberFormatException();
+                    // Units: read the checked radio, default to
+                    // Imperial if neither (shouldn't happen — a
+                    // radio group always has a selection).
+                    UnitSystem picked = unitsRadios.getCheckedRadioButtonId() == metricBtn.getId()
+                            ? UnitSystem.METRIC
+                            : UnitSystem.IMPERIAL;
                     preferences.edit()
                             .putFloat(KEY_AMPS_OUT, out)
                             .putFloat(KEY_AMPS_IN, in)
+                            .putString(KEY_UNITS, picked.name())
                             .apply();
+                    model.setUnitSystem(picked);
+                    view.setUnitSystem(picked);
                     view.setCurrentScale(out, in);
                     ad.dismiss();
                 } catch (NumberFormatException error) {
@@ -370,6 +413,23 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     private void rescanAll() {
         if (bmsClient != null) bmsClient.rescan();
         if (cycClient != null) cycClient.rescan();
+    }
+
+    /**
+     * Reads the persisted unit system from {@code preferences}.
+     * Stored as the enum's {@code name()} string ("IMPERIAL" /
+     * "METRIC"). Missing or unrecognized values fall back to
+     * {@link UnitSystem#IMPERIAL} (the original default) so a
+     * bad write never leaves the app stuck.
+     */
+    private static UnitSystem readUnitSystem(SharedPreferences prefs) {
+        String stored = prefs.getString(KEY_UNITS, null);
+        if (stored == null) return UnitSystem.IMPERIAL;
+        try {
+            return UnitSystem.valueOf(stored);
+        } catch (IllegalArgumentException e) {
+            return UnitSystem.IMPERIAL;
+        }
     }
 
     private EditText currentField(String hint, float value) {

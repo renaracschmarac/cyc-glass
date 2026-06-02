@@ -43,6 +43,14 @@ public final class DataModel {
     // docs/2026-06-02-heading-up-and-speed-sign-plan.md.
     private double gpsSpeedMph = Double.NaN;
 
+    // Display unit system chosen in the settings dialog. Default
+    // Imperial preserves the existing mph/°F behavior. The model
+    // itself stores speeds in mph and temperatures in °F
+    // (canonical); the display layer (GlassView) routes every
+    // rendered value through Units.displaySpeedMph() and
+    // Units.displayTempF() before drawing.
+    private UnitSystem unitSystem = UnitSystem.IMPERIAL;
+
     /** Meters per second to miles per hour. Exact constant from
      * NIST: 1 m/s = 1/0.44704 mph. */
     public static double mpsToMph(double metersPerSecond) {
@@ -107,6 +115,23 @@ public final class DataModel {
 
     /** Latest GPS speed in mph, or NaN if no fix has reported it. */
     public synchronized double gpsSpeedMph() { return gpsSpeedMph; }
+
+    /**
+     * Returns the display unit system chosen in the settings dialog.
+     * The model itself stores canonical units (mph, °F); the display
+     * layer converts to this system's unit before drawing.
+     */
+    public synchronized UnitSystem unitSystem() { return unitSystem; }
+
+    /**
+     * Updates the display unit system. The change takes effect on the
+     * next {@link GlassView#refresh()} — callers should call
+     * {@code view.refresh()} (or {@code view.setUnitSystem(...)}
+     * which wraps it) immediately after to redraw with the new unit.
+     */
+    public synchronized void setUnitSystem(UnitSystem system) {
+        this.unitSystem = system;
+    }
 
     public synchronized double bmsVoltage() { return bmsVoltage; }
     public synchronized double bmsCurrent() { return bmsCurrent; }

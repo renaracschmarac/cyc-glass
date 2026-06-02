@@ -129,6 +129,23 @@ public final class GlassView extends View {
     }
 
     /**
+     * Applies a new unit system: forces a metrics recompute (so
+     * the speed-sign rect resizes for the new shape), repaints
+     * the content description with the new unit, and
+     * invalidates. Call after {@code model.setUnitSystem(...)}
+     * to make the change visible immediately.
+     */
+    public void setUnitSystem(UnitSystem system) {
+        // recomputeBandMetrics() runs on every onDraw, so an
+        // invalidate alone picks up the new unit system
+        // (re-shaping the sign and the perimeter labels/values
+        // on the next frame). setContentDescription() updates
+        // the TalkBack text with the new unit.
+        setContentDescription(buildDescription());
+        postInvalidate();
+    }
+
+    /**
      * Test-only hook for {@link CurrentBandTest} to drive
      * {@link #currentColor()} with a known {@code currentValue} without
      * having to rely on field reflection (which has been unreliable in
@@ -153,12 +170,13 @@ public final class GlassView extends View {
     }
 
     private String buildDescription() {
+        UnitSystem system = model.unitSystem();
         return String.format(Locale.US,
-                "Voltage %s. Current %s. Remaining %s. Speed %s mph. Status %s.",
+                "Voltage %s. Current %s. Remaining %s. Speed %s. Status %s.",
                 formatValue(voltage, "%.1f V"),
                 formatValue(current, "%.1f A"),
                 formatValue(remaining, "%.1f Ah"),
-                Double.isNaN(gpsSpeedMph) ? "\u2014" : String.format("%.0f", gpsSpeedMph),
+                Units.formatSpeedWithUnit(gpsSpeedMph, system),
                 status);
     }
 
@@ -221,17 +239,29 @@ public final class GlassView extends View {
         float cy = this.bandTopPx + topMargin + tapRadius;
         settingsIconRect.set(cx - tapRadius, cy - tapRadius, cx + tapRadius, cy + tapRadius);
 
-        // Speed sign: a 72 dp diameter disc (the EU Vienna
-        // speed-limit sign convention: red ring, white
-        // interior, black numerals, no unit). Bounding box
-        // is square, centered on the gear's X, 16 dp below
-        // the gear's visual bottom edge — same vertical
-        // relationship as the MUTCD rectangle it replaces.
-        float signSize = dp(72);
+        // Speed sign: shape and size both depend on the
+        // chosen unit system. Imperial → US MUTCD rectangle
+        // (64 × 80 dp, taller than wide, black border).
+        // Metric → EU Vienna disc (72 × 72 dp square
+        // bounding box, red ring). Both shapes are centered
+        // on the same X (gear's column) and the same Y
+        // center, so toggling units doesn't make the sign
+        // jump around.
         float signCx = cx;  // same column as the gear center
-        float signTop = this.bandTopPx + dp(84);
-        speedSignRect.set(signCx - signSize / 2f, signTop,
-                signCx + signSize / 2f, signTop + signSize);
+        UnitSystem system = model.unitSystem();
+        float signW = dp((int) Units.signWidthDp(system));
+        float signH = dp((int) Units.signHeightDp(system));
+        // The sign sits 16 dp below the gear's visual bottom
+        // edge. The 84 dp offset below bandTopPx matches the
+        // MUTCD layout (84 = 16 + (80-2*8)/2, with gear
+        // occupying bandTopPx+20 to bandTopPx+68).
+        // For Vienna (square, 72 dp), the top moves to
+        // bandTopPx + 88 so the vertical center matches the
+        // MUTCD's center.
+        float signTop = this.bandTopPx + dp(84)
+                + (dp((int) Units.signHeightDp(UnitSystem.IMPERIAL)) - signH) / 2f;
+        speedSignRect.set(signCx - signW / 2f, signTop,
+                signCx + signW / 2f, signTop + signH);
 
         // Center arrow: chevron tip at (width/2, height/2 - 30dp),
         // base at (width/2 ± 16dp, height/2 - 6dp). The dot sits at
@@ -286,24 +316,38 @@ public final class GlassView extends View {
         canvas.drawRect(0, rowTop, width, rowTop + rowHeight, paint);
 
         // Four cells: get motor/battery values from the model. Units live
-        // in the labels so the value cells stay numeric. All value strings
-        // use at most one decimal place ("%.0f" or "%.1f") so the longest
-        // expected value is 4 characters (e.g. "55.5", "2000", "18.6"),
-        // which gives auto-fit room to land somewhere reasonable per cell.
+        // in the labels so the value cells stay numeric. The mph / °F
+        // cells route through Units.displaySpeedMph() /
+        // Units.displayTempF() so the value follows the unit system
+        // chosen in the settings dialog. All value strings use at most
+        // one decimal place ("%.0f" or "%.1f") so the longest expected
+        // value is 4 characters (e.g. "55.5", "2000", "18.6"), which
+        // gives auto-fit room to land somewhere reasonable per cell.
+        UnitSystem system = model.unitSystem();
         String[] labels;
         String[] values;
         if (isTop) {
-            labels = new String[] { "Lev", "mph", "V", "MOT\u00b0F" };
+            labels = new String[] {
+                    "Lev",
+                    Units.speedLabel(system),
+                    "V",
+                    Units.tempLabel(system, "MOT")
+            };
             values = new String[] {
                     formatInt(model.assistLevel()),
-                    formatValue(model.speedMph(), "%.1f"),
+                    formatValue(Units.displaySpeedMph(model.speedMph(), system), "%.1f"),
                     formatValue(model.bmsVoltage(), "%.1f"),
-                    formatValue(model.motorTempF(), "%.0f")
+                    formatValue(Units.displayTempF(model.motorTempF(), system), "%.0f")
             };
         } else {
-            labels = new String[] { "CTRL\u00b0F", "HumW", "MotW", "CapAh" };
+            labels = new String[] {
+                    Units.tempLabel(system, "CTRL"),
+                    "HumW",
+                    "MotW",
+                    "CapAh"
+            };
             values = new String[] {
-                    formatValue(model.controllerTempF(), "%.0f"),
+                    formatValue(Units.displayTempF(model.controllerTempF(), system), "%.0f"),
                     formatValue(model.humanPowerW(), "%.0f"),
                     formatValue(model.motorPowerW(), "%.0f"),
                     formatValue(model.bmsRemaining(), "%.1f")
@@ -411,48 +455,60 @@ public final class GlassView extends View {
     }
 
     /**
-     * Renders the EU Vienna Convention speed sign directly
-     * below the settings gear. White interior with a red
-     * ring (≈ 8% of the diameter — the sign convention),
-     * integer mph in sans-serif bold black, no unit label.
-     * The numeral auto-fits the inner-white diameter so a
+     * Renders the speed sign directly below the settings gear.
+     * The shape (US MUTCD rectangle for Imperial, EU Vienna
+     * circle for Metric) is picked from
+     * {@code model.unitSystem()}, so the sign reads as a sign
+     * from the same region the unit comes from. In both cases
+     * the interior is white, the numeral is integer in the
+     * display unit (mph or kph), sans-serif bold black, no
+     * unit label, em-dash when no GPS fix has reported speed
+     * yet. The numeral auto-fits the inner-white width so a
      * 3-digit value (100+) is still readable.
      */
     private void drawSpeedSign(Canvas canvas, int width) {
         float cx = (speedSignRect.left + speedSignRect.right) / 2f;
         float cy = (speedSignRect.top + speedSignRect.bottom) / 2f;
-        float radius = speedSignRect.width() / 2f;
-        float ringWidth = dp(6);
+        UnitSystem system = model.unitSystem();
 
         // White interior. We use the shared `paint` for fill /
         // stroke and reset its state when done.
         paint.setColor(Color.WHITE);
         paint.setStyle(Paint.Style.FILL);
-        canvas.drawCircle(cx, cy, radius, paint);
-
-        // Red ring. Drawn as a stroke on a circle inset by
-        // ringWidth/2 from the outer edge, so the ring sits
-        // flush with the white interior and the visible red
-        // band has the requested thickness.
-        paint.setColor(SPEED_SIGN_RED);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(ringWidth);
-        canvas.drawCircle(cx, cy, radius - ringWidth / 2f, paint);
+        if (system == UnitSystem.IMPERIAL) {
+            canvas.drawRect(speedSignRect, paint);
+            // 3 dp black border.
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(3));
+            paint.setColor(Color.BLACK);
+            canvas.drawRect(speedSignRect, paint);
+        } else {
+            // EU Vienna: red ring around a white disc.
+            float radius = speedSignRect.width() / 2f;
+            float ringWidth = dp(6);
+            canvas.drawCircle(cx, cy, radius, paint);
+            // Red ring. Drawn as a stroke on a circle inset by
+            // ringWidth/2 from the outer edge, so the ring sits
+            // flush with the white interior and the visible red
+            // band has the requested thickness.
+            paint.setColor(SPEED_SIGN_RED);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(ringWidth);
+            canvas.drawCircle(cx, cy, radius - ringWidth / 2f, paint);
+        }
         paint.setStyle(Paint.Style.FILL);
 
-        // Speed text. Integer mph, no unit label, em-dash when
-        // no GPS fix has reported speed yet.
-        String text = Double.isNaN(gpsSpeedMph)
-                ? "\u2014"
-                : Integer.toString((int) Math.round(gpsSpeedMph));
+        // Speed text. Integer in the display unit, no unit
+        // label, em-dash when no GPS fix has reported speed yet.
+        String text = Units.formatSpeedInteger(gpsSpeedMph, system);
         paint.setColor(Color.BLACK);
         paint.setTextAlign(Paint.Align.CENTER);
         // Start at ~48 dp; auto-fit down if the text overflows
         // the white interior.
         float startFontPx = Math.max(36.0f, dp(48));
-        float innerDiameter = (radius - ringWidth) * 2f;
+        float innerWidth = speedSignRect.width() * 0.85f;
         float fitted = fitFontSize(text, startFontPx,
-                innerDiameter * 0.85f, paint);
+                innerWidth, paint);
         paint.setTextSize(fitted);
         // Vertical center adjustment: text baseline is below the
         // geometric center by roughly fitted/3.
