@@ -13,19 +13,24 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.preference.PreferenceManager;
 import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.EditText;
-import android.widget.TextView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
+
+import org.osmdroid.config.Configuration;
+import org.osmdroid.util.GeoPoint;
 
 import java.io.IOException;
 import java.util.List;
@@ -35,9 +40,13 @@ import java.util.function.IntConsumer;
 public final class MainActivity extends Activity implements BmsClient.Host, CycClient.Host {
 
     private static final int REQUEST_BLUETOOTH = 100;
+    private static final int REQUEST_LOCATION = 101;
     private static final String SETTINGS_NAME = "display_settings";
     private static final String KEY_AMPS_OUT = "amps_out";
     private static final String KEY_AMPS_IN = "amps_in";
+    private static final String KEY_LAST_KNOWN_LAT = "last_known_lat";
+    private static final String KEY_LAST_KNOWN_LON = "last_known_lon";
+    private static final String KEY_LAST_KNOWN_FIX_MS = "last_known_fix_ms";
     private static final float DEFAULT_AMPS_OUT = 100.0f;
     private static final float DEFAULT_AMPS_IN = 20.0f;
 
@@ -46,12 +55,16 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     private final Runnable refreshView = new Runnable() {
         @Override public void run() {
             if (view != null) view.refresh();
+            if (mapView != null) composeStatusLine();
             handler.postDelayed(this, 100);  // 10 Hz redraw to stay smooth
         }
     };
 
     private SharedPreferences preferences;
     private GlassView view;
+    private MapBackgroundView mapView;
+    private LocationProvider locationProvider;
+    private String lastBaseStatus = "Starting";
     private BluetoothAdapter adapter;
     private BluetoothLeScanner scanner;
     private BmsClient bmsClient;
@@ -62,6 +75,36 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        // osmdroid global configuration. The UA must be set BEFORE
+        // any MapView is inflated. Per OSM's tile usage policy, the UA
+        // identifies the app and includes a contact. The value here is
+        // a default that satisfies the policy; the MapTileSource UA is
+        // also set (the MapTileSource owns the ITileSource, so its UA
+        // is what OSM actually sees in the tile fetch headers, but we
+        // still set the global one for osmdroid's internal logging and
+        // any auxiliary requests).
+        Configuration.getInstance().load(
+                getApplicationContext(),
+                PreferenceManager.getDefaultSharedPreferences(getApplicationContext()));
+        Configuration.getInstance().setUserAgentValue(
+                "cyc-glass/" + BuildConfig.VERSION_NAME
+                        + " (+https://github.com/renaracschmarac/cyc-glass)");
+
+        // Build the tile source and apply its UA to the global
+        // configuration as well, since the same value is what
+        // osmdroid's tile fetcher will use.
+        MapTileSource tileSource;
+        try {
+            tileSource = MapTileSource.fromBuildConfig();
+            Configuration.getInstance().setUserAgentValue(tileSource.userAgent());
+        } catch (IllegalStateException e) {
+            // Misconfigured build (e.g. STADIA without a key). Surface
+            // the error on the status line and continue with a black
+            // background.
+            tileSource = null;
+            lastBaseStatus = "Map misconfigured: " + e.getMessage();
+        }
 
         preferences = getSharedPreferences(SETTINGS_NAME, MODE_PRIVATE);
         float ampsOut = Math.abs(preferences.getFloat(KEY_AMPS_OUT, DEFAULT_AMPS_OUT));
@@ -74,8 +117,35 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         }
 
         view = new GlassView(this, model, ampsOut, ampsIn);
+
+        // Map is created in createContentView() and lives BEHIND the
+        // GlassView in the FrameLayout. Set its tile source before
+        // attaching to the layout.
+        mapView = new MapBackgroundView(this);
+        if (tileSource != null) {
+            mapView.setTileSource(tileSource.tileSource());
+        }
+        // Reasonable default cap; the plan calls for 600 MB.
+        Configuration.getInstance().setTileFileSystemCacheMaxBytes(
+                600L * 1024L * 1024L);
+        mapView.setHorizontalMapRepetitionEnabled(false);
+        mapView.setVerticalMapRepetitionEnabled(false);
+
         setContentView(createContentView());
         hideSystemUi();
+
+        // Seed the map from the last-known SharedPreferences entry.
+        float savedLat = preferences.getFloat(KEY_LAST_KNOWN_LAT, Float.NaN);
+        float savedLon = preferences.getFloat(KEY_LAST_KNOWN_LON, Float.NaN);
+        long savedFixMs = preferences.getLong(KEY_LAST_KNOWN_FIX_MS, 0L);
+        if (!Float.isNaN(savedLat) && !Float.isNaN(savedLon)) {
+            model.setLastKnownLocation(savedLat, savedLon, savedFixMs);
+            mapView.recenterTo(new GeoPoint(savedLat, savedLon));
+        } else {
+            model.clearLastKnownLocation();
+            // No recenter → mapView stays in the no-center state and
+            // renders a solid black background.
+        }
 
         bmsClient = new BmsClient(this, handler, model, preferences,
                 Math.max(50, Math.min(10000,
@@ -90,6 +160,25 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
             cycClient = new CycClient(this, handler, model, preferences, motorInterval, layout);
         }
 
+        // Location provider. We start it after permissions are
+        // granted; see startWhenPermitted.
+        locationProvider = new LocationProvider(this);
+        locationProvider.addListener(new LocationProvider.Listener() {
+            @Override public void onFix(GeoPoint point, long fixMs) {
+                model.setLastKnownLocation(point.getLatitude(), point.getLongitude(), fixMs);
+                preferences.edit()
+                        .putFloat(KEY_LAST_KNOWN_LAT, (float) point.getLatitude())
+                        .putFloat(KEY_LAST_KNOWN_LON, (float) point.getLongitude())
+                        .putLong(KEY_LAST_KNOWN_FIX_MS, fixMs)
+                        .apply();
+                if (mapView != null) mapView.recenterTo(point);
+                composeStatusLine();
+            }
+            @Override public void onPermissionResult(boolean granted) {
+                composeStatusLine();
+            }
+        });
+
         startWhenPermitted();
     }
 
@@ -97,11 +186,16 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     protected void onResume() {
         super.onResume();
         handler.post(refreshView);
+        if (locationProvider != null
+                && locationProvider.hasFineLocationPermission()) {
+            locationProvider.start();
+        }
     }
 
     @Override
     protected void onPause() {
         handler.removeCallbacks(refreshView);
+        if (locationProvider != null) locationProvider.stop();
         super.onPause();
     }
 
@@ -110,23 +204,46 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         handler.removeCallbacks(refreshView);
         if (bmsClient != null) bmsClient.stop();
         if (cycClient != null) cycClient.stop();
+        if (locationProvider != null) locationProvider.stop();
         super.onDestroy();
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQUEST_BLUETOOTH && allGranted(grantResults)) {
-            startClients();
-        } else if (requestCode == REQUEST_BLUETOOTH) {
-            view.setStatus("Bluetooth permission required");
+        if (requestCode == REQUEST_BLUETOOTH) {
+            if (allGranted(grantResults)) {
+                startBleClients();
+            } else {
+                view.setStatus("Bluetooth permission required");
+            }
+        } else if (requestCode == REQUEST_LOCATION) {
+            boolean granted = allGranted(grantResults);
+            if (locationProvider != null) {
+                locationProvider.onPermissionResult(granted);
+            }
+            if (!granted) {
+                // Per the plan, the map stays at the last-known
+                // SharedPreferences center. The status line is
+                // composed by composeStatusLine().
+                composeStatusLine();
+            }
         }
     }
 
     private View createContentView() {
         FrameLayout root = new FrameLayout(this);
-        root.addView(view, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // Map FIRST (drawn first → at the back).
+        FrameLayout.LayoutParams mapParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        root.addView(mapView, mapParams);
+        // GlassView SECOND (drawn on top of the map).
+        FrameLayout.LayoutParams glassParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        root.addView(view, glassParams);
         // The settings gear is drawn directly inside the GlassView's
         // own onDraw (see GlassView.drawSettingsIcon), so a sibling
         // ImageButton isn't needed — the previous sibling-View path
@@ -135,6 +252,31 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         // back into showCurrentSettings() via the listener set below.
         view.setOnSettingsTapListener(() -> showCurrentSettings());
         return root;
+    }
+
+    /**
+     * Composes the status line by prefixing the GPS state (if
+     * searching) to whatever the BLE clients last set. Implements
+     * the Q5 rule: only show "Searching GPS…" while searching, no
+     * sat-lock info once we have a fix.
+     */
+    private void composeStatusLine() {
+        if (view == null) return;
+        String gpsPart = null;
+        if (locationProvider != null) {
+            if (!locationProvider.hasFineLocationPermission()) {
+                gpsPart = "GPS off (no permission)";
+            } else if (locationProvider.isSearching()) {
+                gpsPart = "Searching GPS…";
+            }
+        }
+        String composed;
+        if (gpsPart == null) {
+            composed = lastBaseStatus;
+        } else {
+            composed = gpsPart + " · " + lastBaseStatus;
+        }
+        view.setStatus(composed);
     }
 
     private void showCurrentSettings() {
@@ -208,22 +350,65 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     }
 
     private void startWhenPermitted() {
+        // Step 1: Bluetooth. On API 31+ that's BLUETOOTH_SCAN/CONNECT;
+        // on older releases it's ACCESS_FINE_LOCATION (the historical
+        // BLE-scan permission).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED
                     || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(
                         new String[] {Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT},
                         REQUEST_BLUETOOTH);
-                return;
+            } else {
+                startBleClients();
             }
-        } else if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[] {Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_BLUETOOTH);
-            return;
+        } else {
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                // Pre-S: a single ACCESS_FINE_LOCATION request covered
+                // both BLE scan and location. We ask once and let the
+                // user grant both.
+                requestPermissions(
+                        new String[] {Manifest.permission.ACCESS_FINE_LOCATION},
+                        REQUEST_BLUETOOTH);
+            } else {
+                startBleClients();
+                // Same permission covers map GPS too; the LocationProvider
+                // will start via the permission-already-granted branch
+                // when onResume fires.
+            }
         }
-        startClients();
+
+        // Step 2: Location. On API 23+ ACCESS_FINE_LOCATION is
+        // runtime; request it for the map regardless of BLE state.
+        // On API 31+ it's separate from BLUETOOTH_*; the
+        // pre-S single-permission path above already covered it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this,
+                    Manifest.permission.ACCESS_FINE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                        new String[] {
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                        },
+                        REQUEST_LOCATION);
+            } else {
+                if (locationProvider != null) locationProvider.onPermissionResult(true);
+            }
+        } else {
+            // Pre-S: ACCESS_FINE_LOCATION was already requested above
+            // (under the BLE permission code path). If the user
+            // granted it for BLE, we already started the BLE clients;
+            // the locationProvider will pick it up on onResume.
+            if (ContextCompat.checkSelfPermission(this,
+                    Manifest.permission.ACCESS_FINE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED) {
+                if (locationProvider != null) locationProvider.onPermissionResult(true);
+            }
+        }
     }
 
-    private void startClients() {
+    private void startBleClients() {
         BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
         adapter = manager.getAdapter();
         if (adapter == null || !adapter.isEnabled()) {
@@ -245,7 +430,8 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     public void setStatus(String status) {
         // Run on UI thread; both clients may invoke this from a callback.
         handler.post(() -> {
-            if (view != null) view.setStatus(status);
+            lastBaseStatus = status;
+            composeStatusLine();
         });
     }
 

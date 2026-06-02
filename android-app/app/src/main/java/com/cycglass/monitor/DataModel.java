@@ -29,6 +29,14 @@ public final class DataModel {
     private double humanPowerW = Double.NaN;
     private double motorPowerW = Double.NaN;
 
+    // Last GPS fix used to seed the map on cold start. NaN means
+    // "no fix ever recorded" — the map renders a solid black
+    // background in that case. See
+    // docs/2026-06-01-map-background-plan.md.
+    private double lastKnownLat = Double.NaN;
+    private double lastKnownLon = Double.NaN;
+    private long lastKnownFixMs = 0L;
+
     public synchronized void setBmsMetrics(double voltage, double current, double remaining) {
         this.bmsVoltage = voltage;
         this.bmsCurrent = current;
@@ -44,6 +52,31 @@ public final class DataModel {
         this.controllerTempF = controllerTempF;
         this.humanPowerW = humanPowerW;
         this.motorPowerW = motorPowerW;
+    }
+
+    /**
+     * Records a new GPS fix. Called from {@link LocationProvider} on
+     * every Fused Location callback. Always overwrites — we only
+     * keep the latest.
+     */
+    public synchronized void setLastKnownLocation(double lat, double lon, long fixMs) {
+        this.lastKnownLat = lat;
+        this.lastKnownLon = lon;
+        this.lastKnownFixMs = fixMs;
+    }
+
+    /** Clears the last-known location (e.g. after a re-scan). */
+    public synchronized void clearLastKnownLocation() {
+        this.lastKnownLat = Double.NaN;
+        this.lastKnownLon = Double.NaN;
+        this.lastKnownFixMs = 0L;
+    }
+
+    public synchronized double lastKnownLat() { return lastKnownLat; }
+    public synchronized double lastKnownLon() { return lastKnownLon; }
+    public synchronized long lastKnownFixMs() { return lastKnownFixMs; }
+    public synchronized boolean hasLastKnownLocation() {
+        return !Double.isNaN(lastKnownLat) && !Double.isNaN(lastKnownLon);
     }
 
     public synchronized double bmsVoltage() { return bmsVoltage; }

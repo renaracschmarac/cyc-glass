@@ -10,9 +10,30 @@ android {
         applicationId "com.cycglass.monitor"
         minSdk 23
         targetSdk 35
-        versionCode 1
-        versionName "0.1.0"
+        versionCode 2
+        versionName "0.2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // Map tile source for the dynamic GPS-centered map background
+        // (see docs/2026-06-01-map-background-plan.md). One of:
+        //   "OSM"        — OpenStreetMap raster, no API key (v1 default)
+        //   "STADIA"     — Stadia Maps raster, needs MAP_TILE_API_KEY
+        //   "MAPTILER"   — MapTiler raster, needs MAP_TILE_API_KEY
+        // The escape hatch to a paid provider is a one-line change in
+        // MapTileSource.java; the runtime app code is provider-agnostic.
+        buildConfigField "String", "MAP_TILE_SOURCE", "\"OSM\""
+        // The API key is read from local.properties at build time so it
+        // never lands in the repo. Default is the empty string, which
+        // MapTileSource treats as "no key" and refuses to build a
+        // STADIA/MAPTILER source without one.
+        def mapTileApiKey = (project.findProperty("MAP_TILE_API_KEY")
+                ?: System.getenv("MAP_TILE_API_KEY")
+                ?: "").toString()
+        buildConfigField "String", "MAP_TILE_API_KEY", "\"${mapTileApiKey}\""
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {
@@ -62,6 +83,16 @@ tasks.matching { it.name == "preBuild" }.configureEach {
 }
 
 dependencies {
+    // Map background (raster tile renderer). osmdroid is Apache-2,
+    // mature, single dep, supports any ITileSource. See
+    // docs/2026-06-01-map-background-plan.md for the rationale.
+    implementation "org.osmdroid:osmdroid-android:6.1.18"
+
+    // FusedLocationProviderClient for GPS — 1 Hz, displacement-thresholded,
+    // foreground-only. We use the BOM so the play-services-* versions
+    // stay in sync with each other.
+    implementation "com.google.android.gms:play-services-location:21.3.0"
+
     testImplementation "junit:junit:4.13.2"
     testImplementation "org.json:json:20240303"
 }

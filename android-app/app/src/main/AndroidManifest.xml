@@ -4,10 +4,19 @@
 
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- Foreground-only GPS for the map background. The previous
+         maxSdkVersion=30 cap is removed because the map needs GPS at all
+         SDK levels. We intentionally do NOT request
+         ACCESS_BACKGROUND_LOCATION — see the plan. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- osmdroid fetches tiles over HTTPS from OpenStreetMap. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- osmdroid also wants network state for its tile cache eviction. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:allowBackup="false"
