@@ -65,6 +65,7 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     private MapBackgroundView mapView;
     private LocationProvider locationProvider;
     private OrientationProvider orientationProvider;
+    private MotionHeading motionHeading;
     private String lastBaseStatus = "Starting";
     private BluetoothAdapter adapter;
     private BluetoothLeScanner scanner;
@@ -161,6 +162,17 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
             cycClient = new CycClient(this, handler, model, preferences, motorInterval, layout);
         }
 
+        // Heading router: MotionHeading picks the best source for
+        // the current speed. Below 2 m/s (~4.5 mph) it forwards
+        // the rotation-vector azimuth. At or above that it
+        // computes a GPS bearing from the last 1.5 s of fixes and
+        // uses that instead. The map rotates so that the
+        // direction of motion is "up" on screen.
+        motionHeading = new MotionHeading();
+        motionHeading.addListener((degreesFromNorth, timestampMs) -> {
+            if (mapView != null) mapView.setHeading(degreesFromNorth);
+        });
+
         // Location provider. We start it after permissions are
         // granted; see startWhenPermitted.
         locationProvider = new LocationProvider(this);
@@ -175,6 +187,11 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
                 if (metersPerSecond > 0.0f) {
                     model.setGpsSpeedMph(DataModel.mpsToMph(metersPerSecond));
                 }
+                // Feed the fix into the heading router so it can
+                // compute a GPS bearing when speed is high enough.
+                motionHeading.onLocation(
+                        point.getLatitude(), point.getLongitude(),
+                        fixMs, metersPerSecond);
                 preferences.edit()
                         .putFloat(KEY_LAST_KNOWN_LAT, (float) point.getLatitude())
                         .putFloat(KEY_LAST_KNOWN_LON, (float) point.getLongitude())
@@ -189,16 +206,16 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         });
 
         // Orientation provider. Started in onResume (alongside the
-        // location provider); the listener just forwards heading
-        // changes to the map. The map is in heading-up mode: the
-        // screen's "up" follows the direction the top of the phone
-        // is pointing. We attach the listener unconditionally; if
-        // the device has no rotation vector sensor, isAvailable()
-        // is false and start() is a no-op (we just never receive
-        // any onHeading callbacks).
+        // location provider). Its listener feeds the rotation-vector
+        // azimuth into the heading router, which decides whether
+        // the azimuth or the GPS bearing wins for the current
+        // speed. If the device has no rotation vector sensor,
+        // isAvailable() is false and start() is a no-op (the GPS
+        // path still works, of course, as long as the bike is
+        // moving above the speed threshold).
         orientationProvider = new OrientationProvider(this);
         orientationProvider.addListener((degreesFromNorth, timestampMs) -> {
-            if (mapView != null) mapView.setHeading(degreesFromNorth);
+            motionHeading.onAzimuth(degreesFromNorth, timestampMs);
         });
 
         startWhenPermitted();
