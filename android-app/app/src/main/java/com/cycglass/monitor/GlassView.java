@@ -265,13 +265,13 @@ public final class GlassView extends View {
         paint.setColor(Color.WHITE);
         paint.setTextSize(fontPx);
         // Vertical center adjustment: text baseline is below the geometric
-        // center by roughly fontPx/3. Shifted up 30 px (raw pixels, not
+        // center by roughly fontPx/3. Shifted up 340 px (raw pixels, not
         // dp) so the number clears the blue center arrow — the arrow
         // sits at the exact screen center and would otherwise overlap
         // the digits. The band itself and the perimeter rows are
         // unchanged; only this text's Y moves.
         canvas.drawText(formatValue(current, "%.1f A"),
-                width / 2.0f, top + bandHeight / 2.0f + fontPx / 3.0f - 30, paint);
+                width / 2.0f, top + bandHeight / 2.0f + fontPx / 3.0f - 340, paint);
     }
 
     private void drawPerimeterRow(Canvas canvas, float rowTop, float rowHeight, int width,
