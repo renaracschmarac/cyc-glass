@@ -37,6 +37,18 @@ public final class DataModel {
     private double lastKnownLon = Double.NaN;
     private long lastKnownFixMs = 0L;
 
+    // Latest GPS-derived ground speed in mph. NaN means "no fix
+    // has reported speed yet" — the speed-sign overlay shows
+    // "—" in that case. See
+    // docs/2026-06-02-heading-up-and-speed-sign-plan.md.
+    private double gpsSpeedMph = Double.NaN;
+
+    /** Meters per second to miles per hour. Exact constant from
+     * NIST: 1 m/s = 1/0.44704 mph. */
+    public static double mpsToMph(double metersPerSecond) {
+        return metersPerSecond * 2.2369362920544;
+    }
+
     public synchronized void setBmsMetrics(double voltage, double current, double remaining) {
         this.bmsVoltage = voltage;
         this.bmsCurrent = current;
@@ -78,6 +90,17 @@ public final class DataModel {
     public synchronized boolean hasLastKnownLocation() {
         return !Double.isNaN(lastKnownLat) && !Double.isNaN(lastKnownLon);
     }
+
+    /** Records the latest GPS-derived ground speed in mph. NaN is
+     * a valid input (e.g. the first fix had no Doppler speed, or
+     * the provider is being torn down) and means "no speed known
+     * right now — show the dash placeholder." */
+    public synchronized void setGpsSpeedMph(double mph) {
+        this.gpsSpeedMph = mph;
+    }
+
+    /** Latest GPS speed in mph, or NaN if no fix has reported it. */
+    public synchronized double gpsSpeedMph() { return gpsSpeedMph; }
 
     public synchronized double bmsVoltage() { return bmsVoltage; }
     public synchronized double bmsCurrent() { return bmsCurrent; }

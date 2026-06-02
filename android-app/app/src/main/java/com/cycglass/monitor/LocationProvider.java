@@ -48,8 +48,16 @@ public final class LocationProvider {
         /**
          * Called on the main looper whenever a new fix arrives.
          * {@code point} is never null.
+         *
+         * @param point            the new position
+         * @param fixMs            system time of the fix
+         * @param metersPerSecond  the fix's ground speed in m/s, or
+         *                         0 if the location has no speed
+         *                         (callers should check the
+         *                         underlying Location.hasSpeed() to
+         *                         decide whether to trust it)
          */
-        void onFix(GeoPoint point, long fixMs);
+        void onFix(GeoPoint point, long fixMs, float metersPerSecond);
 
         /**
          * Called on the main looper when the permission state is known.
@@ -82,12 +90,14 @@ public final class LocationProvider {
             GeoPoint point = new GeoPoint(loc.getLatitude(), loc.getLongitude());
             long ms = loc.getTime();
             if (ms <= 0) ms = System.currentTimeMillis();
+            float mps = loc.hasSpeed() ? loc.getSpeed() : 0.0f;
             lastFix = point;
             lastFixMs = ms;
             Log.d(TAG, "fix lat=" + loc.getLatitude()
                     + " lon=" + loc.getLongitude()
-                    + " acc=" + loc.getAccuracy() + "m");
-            for (Listener l : listeners) l.onFix(point, ms);
+                    + " acc=" + loc.getAccuracy() + "m"
+                    + " speed=" + mps + "m/s");
+            for (Listener l : listeners) l.onFix(point, ms, mps);
         }
     };
 

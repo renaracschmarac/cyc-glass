@@ -68,6 +68,64 @@ public class DataModelLocationTest {
     }
 
     @Test
+    public void mpsToMphAtZero() {
+        assertEquals(0.0, DataModel.mpsToMph(0.0), 0.0001);
+    }
+
+    @Test
+    public void mpsToMphAtOneMps() {
+        // 1 m/s = 1 / 0.44704 mph ≈ 2.236936 mph
+        assertEquals(2.236936, DataModel.mpsToMph(1.0), 0.0001);
+    }
+
+    @Test
+    public void mpsToMphAtCommonBikingSpeed() {
+        // 5 m/s ≈ 11.18 mph (typical cycling speed)
+        assertEquals(11.1847, DataModel.mpsToMph(5.0), 0.001);
+    }
+
+    @Test
+    public void mpsToMphRoundTripsToZero() {
+        // 0 m/s should round-trip to 0 mph, not some tiny float drift.
+        assertEquals(0.0, DataModel.mpsToMph(DataModel.mpsToMph(0.0)), 0.0);
+    }
+
+    @Test
+    public void initialGpsSpeedIsNaN() {
+        // The model starts with no GPS speed, which the speed
+        // sign renders as "—".
+        DataModel m = new DataModel();
+        assertTrue("initial gpsSpeedMph must be NaN",
+                Double.isNaN(m.gpsSpeedMph()));
+    }
+
+    @Test
+    public void setGpsSpeedMphRoundTrips() {
+        DataModel m = new DataModel();
+        m.setGpsSpeedMph(18.4);
+        assertEquals(18.4, m.gpsSpeedMph(), 0.0);
+    }
+
+    @Test
+    public void setGpsSpeedMphAcceptsNaN() {
+        // The model should accept NaN as a "no speed known right
+        // now" signal (rare but possible when the GPS provider
+        // tears down or the fix is stale).
+        DataModel m = new DataModel();
+        m.setGpsSpeedMph(20.0);
+        m.setGpsSpeedMph(Double.NaN);
+        assertTrue(Double.isNaN(m.gpsSpeedMph()));
+    }
+
+    @Test
+    public void mpsToMphScalesLinearly() {
+        // 2× the m/s should give 2× the mph.
+        double one = DataModel.mpsToMph(5.0);
+        double two = DataModel.mpsToMph(10.0);
+        assertEquals(2.0 * one, two, 0.0001);
+    }
+
+    @Test
     public void setIsThreadSafe() {
         // Smoke test: from two threads, write alternately, never
         // throw and never observe a half-updated triple. The model

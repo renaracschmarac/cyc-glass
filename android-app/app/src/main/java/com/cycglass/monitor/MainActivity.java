@@ -165,8 +165,16 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         // granted; see startWhenPermitted.
         locationProvider = new LocationProvider(this);
         locationProvider.addListener(new LocationProvider.Listener() {
-            @Override public void onFix(GeoPoint point, long fixMs) {
+            @Override public void onFix(GeoPoint point, long fixMs, float metersPerSecond) {
                 model.setLastKnownLocation(point.getLatitude(), point.getLongitude(), fixMs);
+                // Convert m/s → mph for the speed sign. If the
+                // underlying Location has no Doppler speed, we
+                // keep the previous value rather than zeroing
+                // (the sign will show "—" if the model was never
+                // populated, e.g. before the first fix).
+                if (metersPerSecond > 0.0f) {
+                    model.setGpsSpeedMph(DataModel.mpsToMph(metersPerSecond));
+                }
                 preferences.edit()
                         .putFloat(KEY_LAST_KNOWN_LAT, (float) point.getLatitude())
                         .putFloat(KEY_LAST_KNOWN_LON, (float) point.getLongitude())
