@@ -54,6 +54,14 @@ public final class GlassView extends View {
     private float ampsIn;
     private String status = "Starting";
 
+    // GPS speed sign state, mirrored from DataModel. NaN means
+    // "no speed known" and the sign shows the em-dash placeholder.
+    private double gpsSpeedMph = Double.NaN;
+
+    // Visual constants for the speed sign and center arrow.
+    // Material Blue 700.
+    private static final int CENTER_ARROW_BLUE = 0xFF1976D2;
+
     // Layout metrics recomputed in onSizeChanged (and again in onDraw
     // for safety) and exposed for overlay positioning. See
     // getBandTopPx / getBandBottomPx.
@@ -71,6 +79,11 @@ public final class GlassView extends View {
     private final Paint gearPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint gearHolePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF settingsIconRect = new RectF();
+    // Speed sign (US MUTCD rectangle below the gear) and center
+    // arrow (chevron + dot at the screen center). Layout is
+    // recomputed in recomputeBandMetrics.
+    private final RectF speedSignRect = new RectF();
+    private final Path centerArrowPath = new Path();
     private Runnable onSettingsTapListener;
 
     public GlassView(Context context, DataModel model, float ampsOut, float ampsIn) {
@@ -130,16 +143,18 @@ public final class GlassView extends View {
         this.current = model.bmsCurrent();
         this.remaining = model.bmsRemaining();
         this.currentValue = current;
+        this.gpsSpeedMph = model.gpsSpeedMph();
         setContentDescription(buildDescription());
         postInvalidate();
     }
 
     private String buildDescription() {
         return String.format(Locale.US,
-                "Voltage %s. Current %s. Remaining %s. Status %s.",
+                "Voltage %s. Current %s. Remaining %s. Speed %s mph. Status %s.",
                 formatValue(voltage, "%.1f V"),
                 formatValue(current, "%.1f A"),
                 formatValue(remaining, "%.1f Ah"),
+                Double.isNaN(gpsSpeedMph) ? "\u2014" : String.format("%.0f", gpsSpeedMph),
                 status);
     }
 
@@ -167,6 +182,8 @@ public final class GlassView extends View {
         drawMainBand(canvas, bandTop, mainBandHeight, width, bandFontPx);
         drawPerimeterRow(canvas, bandBottom, perimeterRowHeight, width, perimeterLabelPx, perimeterFontPx, false);
         drawSettingsIcon(canvas, width);
+        drawSpeedSign(canvas, width);
+        drawCenterArrow(canvas, width, height);
 
         // Status line in the gutter below the bottom row.
         paint.setTextSize(statusFontPx);
@@ -199,6 +216,30 @@ public final class GlassView extends View {
         float cx = width - rightMargin - tapRadius;
         float cy = this.bandTopPx + topMargin + tapRadius;
         settingsIconRect.set(cx - tapRadius, cy - tapRadius, cx + tapRadius, cy + tapRadius);
+
+        // Speed sign: 80 dp tall × 64 dp wide, centered on the
+        // gear's X, 16 dp below the gear's visual bottom edge. The
+        // US MUTCD rectangle is taller than wide.
+        float signWidth = dp(64);
+        float signHeight = dp(80);
+        float signCx = cx;  // same column as the gear center
+        float signTop = this.bandTopPx + dp(84);
+        speedSignRect.set(signCx - signWidth / 2f, signTop,
+                signCx + signWidth / 2f, signTop + signHeight);
+
+        // Center arrow: chevron tip at (width/2, height/2 - 30dp),
+        // base at (width/2 ± 16dp, height/2 - 6dp). The dot sits at
+        // the exact screen center, just below the chevron's base.
+        // The path is built fresh every layout pass because the
+        // arrow is small and the cost is negligible.
+        float halfWidth = dp(16);
+        float tipY = height / 2f - dp(30);
+        float baseY = height / 2f - dp(6);
+        centerArrowPath.reset();
+        centerArrowPath.moveTo(width / 2f, tipY);
+        centerArrowPath.lineTo(width / 2f + halfWidth, baseY);
+        centerArrowPath.lineTo(width / 2f - halfWidth, baseY);
+        centerArrowPath.close();
     }
 
     /** Y pixel where the main current band starts (bottom of the top
@@ -357,6 +398,72 @@ public final class GlassView extends View {
         // and not a solid disc.
         gearHolePaint.setColor(currentColor());
         canvas.drawCircle(cx, cy, visualRadius * 0.35f, gearHolePaint);
+    }
+
+    /**
+     * Renders the US MUTCD-style speed sign directly below the
+     * settings gear. White interior, 3 dp black border, integer
+     * mph in sans-serif bold black, no unit label. The numeral
+     * auto-fits the rectangle width — a 3-digit value (100+) is
+     * still readable at 64 dp wide.
+     */
+    private void drawSpeedSign(Canvas canvas, int width) {
+        // White interior. We use the shared `paint` for fill /
+        // stroke and reset its state when done.
+        paint.setColor(Color.WHITE);
+        paint.setStyle(Paint.Style.FILL);
+        canvas.drawRect(speedSignRect, paint);
+
+        // 3 dp black border.
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(dp(3));
+        paint.setColor(Color.BLACK);
+        canvas.drawRect(speedSignRect, paint);
+        paint.setStyle(Paint.Style.FILL);
+
+        // Speed text. Integer mph, no unit label, em-dash when no
+        // GPS fix has reported speed yet.
+        String text = Double.isNaN(gpsSpeedMph)
+                ? "\u2014"
+                : Integer.toString((int) Math.round(gpsSpeedMph));
+        paint.setColor(Color.BLACK);
+        paint.setTextAlign(Paint.Align.CENTER);
+        // Start at ~48 dp; auto-fit down if the text overflows.
+        float startFontPx = Math.max(36.0f, dp(48));
+        float fitted = fitFontSize(text, startFontPx,
+                speedSignRect.width() * 0.85f, paint);
+        paint.setTextSize(fitted);
+        float cx = (speedSignRect.left + speedSignRect.right) / 2f;
+        float cy = (speedSignRect.top + speedSignRect.bottom) / 2f;
+        // Vertical center adjustment: text baseline is below the
+        // geometric center by roughly fontPx/3.
+        canvas.drawText(text, cx, cy + fitted / 3f, paint);
+    }
+
+    /**
+     * Renders the center arrow: a blue chevron pointing straight
+     * up (the user's "front" direction) with a solid blue dot at
+     * the exact screen center marking the GPS position. The arrow
+     * is in screen space and never rotates with the map.
+     */
+    private void drawCenterArrow(Canvas canvas, int width, int height) {
+        // Filled chevron.
+        paint.setColor(CENTER_ARROW_BLUE);
+        paint.setStyle(Paint.Style.FILL);
+        canvas.drawPath(centerArrowPath, paint);
+
+        // Thin white outline so the arrow reads on light map
+        // tiles. The outline is drawn over the fill.
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(dp(1));
+        paint.setColor(Color.WHITE);
+        canvas.drawPath(centerArrowPath, paint);
+        paint.setStyle(Paint.Style.FILL);
+
+        // Center dot (also blue, drawn over the outline so the
+        // arrow reads as a single visual unit).
+        paint.setColor(CENTER_ARROW_BLUE);
+        canvas.drawCircle(width / 2f, height / 2f, dp(6), paint);
     }
 
     /**
