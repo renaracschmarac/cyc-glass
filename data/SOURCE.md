@@ -23,6 +23,7 @@ for the live captures that established this.
 | `temp_fet_filtered` |      0 |      2 |    10 |  int | Controller (FET) temperature, °C     |
 | `temp_motor_filtered`|     2 |      2 |    10 |  int | Motor temperature, °C                |
 | `reset_avg_motor_current`|  4 |      4 |   100 |  int | Motor current, A                     |
+| `reset_avg_input_current`|  8 |      4 |   100 |  int | Controller input / battery current, A |
 | `Input_V`           |     26 |      2 |    10 |  int | Pack voltage, V                      |
 | `Human Power`       |     76 |      4 |     1 |  int | Rider power, W (from torque sensor)  |
 | `Speed`             |     80 |      4 |   100 |  int | Speed, mph once app is in imperial   |
@@ -32,6 +33,13 @@ for the live captures that established this.
 
 - **Motor power (W):** `Input_V * reset_avg_motor_current` — electrical
   input to the controller; matches the CYC app's "Motor Power" display.
+- **Displayed voltage (V):** `Input_V` while CYC telemetry is available;
+  otherwise the visible voltage cell falls back to Daly BMS voltage.
+- **Displayed current (A):** `-reset_avg_input_current` while CYC
+  telemetry is available; otherwise the current band falls back to Daly
+  BMS current. The controller reports battery draw as positive, while
+  this app keeps blu-battery's convention of negative current out of
+  the pack while riding.
 - **Controller / motor temperature in °F:** `°F = °C × 9/5 + 32`.
 - **Speed unit:** the CYC app shows the `Speed` field in mph once the
   display is set to imperial (matches the blu-battery convention); the

@@ -9,12 +9,13 @@ package com.cycglass.monitor;
  *
  * <p>Each setter is synchronized on the field triple so that the three
  * related numbers update atomically. This avoids the visual artifact of, for
- * example, a new {@code amps} value being drawn against a stale
- * {@code voltage} value when the UI thread snapshots them in two steps.
+ * example, a new motor value being drawn against stale companion telemetry
+ * when the UI thread snapshots them in two steps.
  */
 public final class DataModel {
 
-    // Battery metrics from the Daly BMS. Defaults render as "—".
+    // Battery metrics from the Daly BMS. Defaults render as "—". The display
+    // uses these values whenever CYC motor input telemetry is unavailable.
     private double bmsVoltage = Double.NaN;
     private double bmsCurrent = Double.NaN;
     private double bmsRemaining = Double.NaN;
@@ -28,6 +29,9 @@ public final class DataModel {
     private double controllerTempF = Double.NaN;
     private double humanPowerW = Double.NaN;
     private double motorPowerW = Double.NaN;
+    private double motorInputVoltageV = Double.NaN;
+    private double motorInputCurrentA = Double.NaN;
+    private boolean motorInputAvailable;
 
     // Last GPS fix used to seed the map on cold start. NaN means
     // "no fix ever recorded" — the map renders a solid black
@@ -71,13 +75,28 @@ public final class DataModel {
 
     public synchronized void setMotorMetrics(int assistLevel, double speedMph,
                                              double motorTempF, double controllerTempF,
-                                             double humanPowerW, double motorPowerW) {
+                                             double humanPowerW, double motorPowerW,
+                                             double motorInputVoltageV,
+                                             double motorInputCurrentA) {
         this.assistLevel = assistLevel;
         this.speedMph = speedMph;
         this.motorTempF = motorTempF;
         this.controllerTempF = controllerTempF;
         this.humanPowerW = humanPowerW;
         this.motorPowerW = motorPowerW;
+        this.motorInputVoltageV = motorInputVoltageV;
+        this.motorInputCurrentA = motorInputCurrentA;
+        this.motorInputAvailable = true;
+    }
+
+    /**
+     * Marks CYC input telemetry unavailable so voltage and current fall back
+     * to the BMS instead of leaving stale motor-controller values visible.
+     */
+    public synchronized void clearMotorInputMetrics() {
+        this.motorInputVoltageV = Double.NaN;
+        this.motorInputCurrentA = Double.NaN;
+        this.motorInputAvailable = false;
     }
 
     /**
@@ -142,4 +161,13 @@ public final class DataModel {
     public synchronized double controllerTempF() { return controllerTempF; }
     public synchronized double humanPowerW() { return humanPowerW; }
     public synchronized double motorPowerW() { return motorPowerW; }
+    public synchronized double motorInputVoltageV() { return motorInputVoltageV; }
+    public synchronized double motorInputCurrentA() { return motorInputCurrentA; }
+    public synchronized boolean motorInputAvailable() { return motorInputAvailable; }
+    public synchronized double displayVoltageV() {
+        return motorInputAvailable ? motorInputVoltageV : bmsVoltage;
+    }
+    public synchronized double displayCurrentA() {
+        return motorInputAvailable ? motorInputCurrentA : bmsCurrent;
+    }
 }

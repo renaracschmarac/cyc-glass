@@ -61,6 +61,7 @@ public class CycLayoutTest {
         assertEquals(30.0, layout.field("temp_motor_filtered").decode(telemetry), 1e-9);
         assertEquals(48.0, layout.field("Input_V").decode(telemetry), 1e-9);
         assertEquals(5.00, layout.field("reset_avg_motor_current").decode(telemetry), 1e-9);
+        assertEquals(3.25, layout.field("reset_avg_input_current").decode(telemetry), 1e-9);
         assertEquals(12.34, layout.field("Speed").decode(telemetry), 1e-9);
         assertEquals(84.0, layout.field("Human Power").decode(telemetry), 1e-9);
         assertEquals(3.0, layout.field("Assist Level").decode(telemetry), 1e-9);

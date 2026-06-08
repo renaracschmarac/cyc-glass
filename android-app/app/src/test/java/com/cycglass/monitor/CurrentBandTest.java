@@ -123,6 +123,57 @@ public class CurrentBandTest {
         }
     }
 
+    @Test
+    public void refreshUsesCycVoltageAndCurrentForCenterBand() throws Exception {
+        DataModel model = new DataModel();
+        model.setBmsMetrics(52.0, -11.0, 18.6);
+        model.setMotorMetrics(1, 10.0, 80.0, 79.0, 84.0, 240.0, 48.0, -3.25);
+        GlassView v = new GlassView((android.content.Context) null, model, 100.0f, 20.0f);
+
+        v.refresh();
+
+        Field voltage = GlassView.class.getDeclaredField("voltage");
+        voltage.setAccessible(true);
+        Field current = GlassView.class.getDeclaredField("current");
+        current.setAccessible(true);
+        Field currentValue = GlassView.class.getDeclaredField("currentValue");
+        currentValue.setAccessible(true);
+        assertEquals(48.0, voltage.getDouble(v), 0.0);
+        assertEquals(-3.25, current.getDouble(v), 0.0);
+        assertEquals(-3.25, currentValue.getDouble(v), 0.0);
+    }
+
+    @Test
+    public void refreshFallsBackToBmsVoltageAndCurrentWithoutCycTelemetry() throws Exception {
+        DataModel model = new DataModel();
+        model.setBmsMetrics(56.4, 8.7, 18.6);
+        GlassView v = new GlassView((android.content.Context) null, model, 100.0f, 20.0f);
+
+        v.refresh();
+
+        Field voltage = GlassView.class.getDeclaredField("voltage");
+        voltage.setAccessible(true);
+        Field current = GlassView.class.getDeclaredField("current");
+        current.setAccessible(true);
+        assertEquals(56.4, voltage.getDouble(v), 0.0);
+        assertEquals(8.7, current.getDouble(v), 0.0);
+    }
+
+    @Test
+    public void clearingCycTelemetryRestoresBmsFallback() {
+        DataModel model = new DataModel();
+        model.setBmsMetrics(56.4, 8.7, 18.6);
+        model.setMotorMetrics(1, 10.0, 80.0, 79.0, 84.0, 240.0, 48.0, -3.25);
+
+        assertEquals(48.0, model.displayVoltageV(), 0.0);
+        assertEquals(-3.25, model.displayCurrentA(), 0.0);
+
+        model.clearMotorInputMetrics();
+
+        assertEquals(56.4, model.displayVoltageV(), 0.0);
+        assertEquals(8.7, model.displayCurrentA(), 0.0);
+    }
+
     /** Constructs a GlassView with a known current value for tests. */
     private static GlassView newView(double current, float ampsOut, float ampsIn) {
         // The constructor takes a Context; we never call any method that

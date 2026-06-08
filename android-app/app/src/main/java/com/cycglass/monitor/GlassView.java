@@ -160,8 +160,8 @@ public final class GlassView extends View {
      * to call from a {@code postDelayed} poll at the desired display rate.
      */
     public void refresh() {
-        this.voltage = model.bmsVoltage();
-        this.current = model.bmsCurrent();
+        this.voltage = model.displayVoltageV();
+        this.current = model.displayCurrentA();
         this.remaining = model.bmsRemaining();
         this.currentValue = current;
         this.gpsSpeedMph = model.gpsSpeedMph();
@@ -336,7 +336,7 @@ public final class GlassView extends View {
             values = new String[] {
                     formatInt(model.assistLevel()),
                     formatValue(Units.displaySpeedMph(model.speedMph(), system), "%.1f"),
-                    formatValue(model.bmsVoltage(), "%.1f"),
+                    formatValue(model.displayVoltageV(), "%.1f"),
                     formatValue(Units.displayTempF(model.motorTempF(), system), "%.0f")
             };
         } else {

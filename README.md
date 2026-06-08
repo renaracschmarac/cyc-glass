@@ -26,12 +26,15 @@ connection at 5 Hz per peripheral.
 +--------------------------------------------------------+
 ```
 
-- The **CURRENT** band is the single large color-graded value; the
-  color scale mirrors blu-battery's (dark green at 0 A, yellow at half
-  scale, bright red at the configured limit).
+- The **CURRENT** band is the single large color-graded value. While the
+  motor is connected it uses CYC `reset_avg_input_current`, inverted so
+  discharge/riding is negative. When CYC telemetry is unavailable it
+  falls back to Daly BMS current, including positive charging current.
+  The color scale remains dark green at 0 A, yellow at half scale, and
+  bright red at the configured limit.
 - The two perimeter rows (8 small cells total) carry the CYC motor
-  telemetry (`Lev`, `SPD`, `MOT`, `CTRL`, `HumW`, `MotW`) plus the two
-  secondary battery values (`V`, `Cap`). The perimeter font is sized
+  telemetry (`Lev`, `SPD`, `V`, `MOT`, `CTRL`, `HumW`, `MotW`) plus
+  Daly BMS capacity (`Cap`). The perimeter font is sized
   so units fit in their cells without overflow.
 - The status line below the bottom row shows the current connection
   state ("Verifying motor telemetry", "Live 4.9 Hz", etc.).
@@ -60,11 +63,15 @@ both remembered addresses and re-runs discovery.
 - **Motor power (W)** is computed as `Input_V × reset_avg_motor_current`
   (electrical input to the controller). This is the same value the CYC
   Ride Control app shows as "Motor Power".
+- **Displayed voltage (V)** comes from the CYC `Input_V` field while
+  motor telemetry is available and falls back to Daly BMS voltage when
+  the motor is off or disconnected.
 - **Human power (W)** is a direct field (`Human Power` at offset 76) and
   comes from the torque sensor in the bottom bracket; no derivation.
 - **Current sign convention** matches blu-battery: positive for current
   into the pack (charging), negative for current out of the pack
-  (discharging / riding).
+  (discharging / riding). CYC input current is inverted before display
+  because the controller reports draw as positive.
 
 ## Build
 

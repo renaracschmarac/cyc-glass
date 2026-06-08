@@ -73,11 +73,11 @@ public class VescFramingTest {
      * Builds a synthetic 87-byte telemetry payload (VESC {@code COMM_GET_VALUES}
      * response body) with values that map cleanly onto the cyc_uart layout:
      * controller temp = 25.0 C, motor temp = 30.0 C, input V = 48.0 V,
-     * motor current = 5.00 A, speed = 12.34, human power = 84 W, assist = 3.
-     * All other fields are zero. The body is the 86 bytes that follow the
-     * leading VESC command byte (0x04). Multi-byte fields are written
-     * big-endian, matching the wire format the CYC controller actually
-     * emits (and the cygnus-bike reference decoder).
+     * motor current = 5.00 A, input current = 3.25 A, speed = 12.34,
+     * human power = 84 W, assist = 3. All other fields are zero. The body is
+     * the 86 bytes that follow the leading VESC command byte (0x04).
+     * Multi-byte fields are written big-endian, matching the wire format the
+     * CYC controller actually emits (and the cygnus-bike reference decoder).
      */
     static byte[] makeSyntheticTelemetry() {
         byte[] body = new byte[86];
@@ -89,6 +89,8 @@ public class VescFramingTest {
         writeInt16BE(body, 26, 480);
         // reset_avg_motor_current: int32 BE, scale 100, value 5.00 A → 500
         writeInt32BE(body, 4, 500);
+        // reset_avg_input_current: int32 BE, scale 100, value 3.25 A → 325
+        writeInt32BE(body, 8, 325);
         // Speed: int32 BE, scale 100, value 12.34 → 1234
         writeInt32BE(body, 80, 1234);
         // Human Power: int32 BE, scale 1, value 84 W → 84

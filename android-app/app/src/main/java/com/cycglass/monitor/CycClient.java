@@ -131,6 +131,7 @@ public final class CycClient {
 
     @SuppressWarnings("MissingPermission")
     public void start() {
+        model.clearMotorInputMetrics();
         BluetoothAdapter adapter = host.adapter();
         if (adapter == null || !adapter.isEnabled()) {
             host.setStatus("Turn Bluetooth on");
@@ -154,6 +155,7 @@ public final class CycClient {
 
     @SuppressWarnings("MissingPermission")
     public void stop() {
+        model.clearMotorInputMetrics();
         handler.removeCallbacks(poll);
         handler.removeCallbacks(resolveScan);
         handler.removeCallbacks(rejectTimeout);
@@ -169,6 +171,7 @@ public final class CycClient {
 
     @SuppressWarnings("MissingPermission")
     public void rescan() {
+        model.clearMotorInputMetrics();
         handler.removeCallbacks(poll);
         handler.removeCallbacks(resolveScan);
         handler.removeCallbacks(rejectTimeout);
@@ -202,6 +205,7 @@ public final class CycClient {
 
     @SuppressWarnings("MissingPermission")
     private void connectDevice(BluetoothDevice device) {
+        model.clearMotorInputMetrics();
         if (scanning && host.scanner() != null) host.scanner().stopScan(scanCallback);
         scanning = false;
         selectingDevice = false;
@@ -248,6 +252,7 @@ public final class CycClient {
 
     @SuppressWarnings("MissingPermission")
     private void reject(String reason) {
+        model.clearMotorInputMetrics();
         if (tryingRememberedDevice) {
             preferences.edit().remove(KEY_MOTOR_ADDRESS).remove(KEY_MOTOR_LABEL).apply();
             tryingRememberedDevice = false;
@@ -290,6 +295,7 @@ public final class CycClient {
                 host.setStatus("Motor connected");
                 g.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                model.clearMotorInputMetrics();
                 handler.removeCallbacks(poll);
                 handler.removeCallbacks(rejectTimeout);
                 txCharacteristic = null;
@@ -372,6 +378,7 @@ public final class CycClient {
         double controllerTempC = layout.field("temp_fet_filtered").decode(telemetry);
         double voltage = layout.field("Input_V").decode(telemetry);
         double motorCurrent = layout.field("reset_avg_motor_current").decode(telemetry);
+        double inputCurrent = layout.field("reset_avg_input_current").decode(telemetry);
         double speed = layout.field("Speed").decode(telemetry);
         double humanPower = layout.field("Human Power").decode(telemetry);
         double assistLevel = layout.field("Assist Level").decode(telemetry);
@@ -386,8 +393,12 @@ public final class CycClient {
         // Electrical input power: V * A. scale of voltage = 10, scale of
         // current = 100, so product is in (V*100)*(A*100)/10000 = W.
         double motorPowerW = voltage * motorCurrent;
+        // CYC/VESC input current is positive while drawing from the pack.
+        // The UI's existing current-band convention is negative for amps out.
+        double displayInputCurrent = -inputCurrent;
         int assist = displayAssistLevel((int) Math.round(assistLevel));
-        model.setMotorMetrics(assist, speedMph, motorTempF, controllerTempF, humanPower, motorPowerW);
+        model.setMotorMetrics(assist, speedMph, motorTempF, controllerTempF, humanPower,
+                motorPowerW, voltage, displayInputCurrent);
     }
 
     static int displayAssistLevel(int rawAssistLevel) {
