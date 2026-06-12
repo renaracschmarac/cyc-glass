@@ -16,29 +16,37 @@ import org.osmdroid.util.GeoPoint;
 import org.osmdroid.views.MapView;
 import org.osmdroid.views.overlay.Overlay;
 
+import org.osmdroid.events.MapListener;
+import org.osmdroid.events.ScrollEvent;
+import org.osmdroid.events.ZoomEvent;
+
 /**
- * Full-screen, no-controls osmdroid {@link MapView} that lives behind
- * the {@link GlassView} as the app's dynamic GPS-centered backdrop.
+ * Full-screen osmdroid {@link MapView} that lives behind the {@link GlassView}
+ * as the app's dynamic GPS-centered backdrop.
  *
  * <p>Behavior:
  *
  * <ul>
- *   <li>No zoom buttons, no compass, no MyLocation overlay dot, no
- *       markers, no multi-touch zoom (gestures are swallowed so a
- *       stray touch on the map never pans it).</li>
- *   <li>Default scale: screen width ≈ 1000 ft (304.8 m) — the zoom is
- *       recomputed in {@link #onSizeChanged(int, int, int, int)}.</li>
+ *   <li>Zoom is supported via on-screen +/- buttons (styled like
+ *       classic transparent OSM/Google map controls) and simple
+ *       gestures (pinch-to-zoom + double-tap). See GlassView and
+ *       MainActivity for the input routing.</li>
+ *   <li>No user panning — single-touch drags are swallowed so the map
+ *       stays strictly GPS-centered (and heading-rotated).</li>
+ *   <li>Default/initial scale: screen width ≈ 1000 ft (304.8 m). This
+ *       is applied only until the user manually zooms; after that the
+ *       user's chosen zoom level is preserved (including across
+ *       rotations).</li>
  *   <li>Initial center is set via {@link #setInitialCenter(GeoPoint)};
  *       until that happens we render a solid black background
  *       (no tiles, no centered text).</li>
  *   <li>Subsequent updates come from {@link #recenterTo(GeoPoint)};
- *       the map smoothly animates to the new center.</li>
+ *       the map smoothly animates to the new center while preserving
+ *       the current zoom level.</li>
  * </ul>
  *
- * <p>This view is intentionally minimal. Pan/zoom/markers are out of
- * scope for v1 — it's a backdrop, not a map app.
- *
- * <p>See {@code docs/2026-06-01-map-background-plan.md}.
+ * <p>See {@code docs/2026-06-01-map-background-plan.md} (original
+ * backdrop design) and the zoom-controls feature addition.
  */
 public final class MapBackgroundView extends MapView {
 
@@ -59,6 +67,7 @@ public final class MapBackgroundView extends MapView {
     private final Paint blackFill = new Paint();
     @Nullable private GeoPoint pendingCenter;
     private int lastZoomLevel = -1;
+    private boolean userHasZoomed = false;
 
     public MapBackgroundView(Context context) {
         super(context);
@@ -87,9 +96,13 @@ public final class MapBackgroundView extends MapView {
         blackFill.setColor(Color.BLACK);
         blackFill.setStyle(Paint.Style.FILL);
 
-        // Disable every UI affordance osmdroid offers. This is a
-        // backdrop, not an interactive map.
-        setMultiTouchControls(false);
+        // Multi-touch (pinch) is enabled so forwarded gestures from
+        // GlassView can drive zoom. We still provide our own +/- buttons
+        // (see MainActivity) for the classic transparent map UI look.
+        // Built-in controls and all other "interactive map" affordances
+        // remain disabled — this is still fundamentally a GPS-centered
+        // backdrop.
+        setMultiTouchControls(true);
         setBuiltInZoomControls(false);
         setHorizontalMapRepetitionEnabled(false);
         setVerticalMapRepetitionEnabled(false);
@@ -101,10 +114,24 @@ public final class MapBackgroundView extends MapView {
         // own background and the black-fill branch never shows.
         setBackgroundColor(Color.TRANSPARENT);
 
-        // Swallow touches. The GlassView above us handles taps (gear
-        // icon); the map underneath must not steal them.
+        // Single-touch drags are still swallowed (no user pan). Multi-
+        // touch and double-tap events are selectively forwarded by
+        // GlassView. The clickable/focusable flags keep the view from
+        // stealing focus from the HUD.
         setClickable(false);
         setFocusable(false);
+
+        // Listen for any zoom changes (from forwarded pinch, double-tap,
+        // or our own +/- buttons) so we can remember the user's choice
+        // and stop forcing the 1000-ft default scale on rotation etc.
+        addMapListener(new MapListener() {
+            @Override public boolean onScroll(ScrollEvent event) { return false; }
+            @Override public boolean onZoom(ZoomEvent event) {
+                lastZoomLevel = (int) Math.round(event.getZoomLevel());
+                userHasZoomed = true;
+                return false;
+            }
+        });
     }
 
     /**
@@ -121,6 +148,23 @@ public final class MapBackgroundView extends MapView {
      */
     public void setHeading(float degrees) {
         setMapOrientation(-degrees);
+    }
+
+    /**
+     * Zoom in one level using the controller. The MapListener registered
+     * in configure() will observe the ZoomEvent and set userHasZoomed.
+     * Safe to call from UI thread (buttons, gesture callbacks).
+     */
+    public void zoomIn() {
+        getController().zoomIn();
+    }
+
+    /**
+     * Zoom out one level using the controller. The MapListener registered
+     * in configure() will observe the ZoomEvent and set userHasZoomed.
+     */
+    public void zoomOut() {
+        getController().zoomOut();
     }
 
     /**
@@ -163,7 +207,17 @@ public final class MapBackgroundView extends MapView {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        recomputeZoomForWidth(w, pendingCenter);
+        // Only auto-apply the 1000-ft default scale while the user has
+        // never manually zoomed. After the first zoomIn/zoomOut/pinch
+        // we preserve whatever logical zoom level the user chose
+        // (including across rotations).
+        if (!userHasZoomed) {
+            recomputeZoomForWidth(w, pendingCenter);
+        } else if (lastZoomLevel > 0) {
+            // Keep the user's zoom level explicitly (rotation can
+            // sometimes reset internal state in the view).
+            getController().setZoom(lastZoomLevel);
+        }
     }
 
     @Override
@@ -198,8 +252,15 @@ public final class MapBackgroundView extends MapView {
      * <p>Formula: {@code Z = log2(W * 156543.03392 * cos(φ) / 304.8)}
      * — see the plan. We clamp Z to the range osmdroid supports
      * (0..MAX_ZOOM_LEVEL, default 22).
+     *
+     * <p>After the user has manually zoomed (via buttons or gesture)
+     * this method becomes a no-op; we preserve the user's chosen
+     * logical zoom level.
      */
     void recomputeZoomForWidth(int widthPx, @Nullable GeoPoint around) {
+        if (userHasZoomed) {
+            return; // user controls zoom now; keep their level
+        }
         if (widthPx <= 0) return;
         double lat = (around != null) ? around.getLatitude() : 0.0;
         double cosLat = Math.cos(Math.toRadians(lat));

@@ -7,7 +7,9 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 
 import java.util.Locale;
@@ -90,6 +92,19 @@ public final class GlassView extends View {
     private final Path centerArrowPath = new Path();
     private Runnable onSettingsTapListener;
 
+    // Reference to the map for zoom gestures and button-driven zoom.
+    // Set by MainActivity after both views are created (map lives
+    // behind us in the FrameLayout).
+    private MapBackgroundView mapViewForZoom;
+
+    // Detectors for the two "simple gestures" we support for map zoom:
+    // pinch (multi-touch scale) and double-tap (zoom in).
+    // We feed them from onTouchEvent and only forward the relevant
+    // events to the underlying MapBackgroundView (we never let single-
+    // finger drags reach it, preserving the "no user pan" contract).
+    private final GestureDetector gestureDetector;
+    private final ScaleGestureDetector scaleDetector;
+
     public GlassView(Context context, DataModel model, float ampsOut, float ampsIn) {
         super(context);
         this.model = model;
@@ -101,6 +116,27 @@ public final class GlassView extends View {
         gearPaint.setStyle(Paint.Style.FILL);
         gearHolePaint.setColor(Color.BLACK);
         gearHolePaint.setStyle(Paint.Style.FILL);
+
+        // Gesture detectors for map zoom (pinch + double-tap).
+        // The listeners are lightweight; the real work (forwarding or
+        // calling zoomIn) happens in onTouchEvent / the callbacks.
+        gestureDetector = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                if (mapViewForZoom != null) {
+                    mapViewForZoom.zoomIn();
+                    return true;
+                }
+                return false;
+            }
+        });
+        scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            // We don't need to react here — we forward the raw multi-touch
+            // events to the MapView (which has setMultiTouchControls(true))
+            // so osmdroid's internal ScaleGestureDetector does the zoom.
+            // Keeping the detector is harmless and makes the code symmetric.
+        });
+
         setContentDescription(buildDescription());
     }
 
@@ -111,6 +147,15 @@ public final class GlassView extends View {
      */
     public void setOnSettingsTapListener(Runnable listener) {
         this.onSettingsTapListener = listener;
+    }
+
+    /**
+     * Supplies the MapBackgroundView so we can forward zoom gestures
+     * (pinch / double-tap) and so the +/- buttons (created in
+     * MainActivity) can drive zoom. Called once after construction.
+     */
+    public void setMapViewForZoom(MapBackgroundView mapView) {
+        this.mapViewForZoom = mapView;
     }
 
     public void setStatus(String value) {
@@ -579,24 +624,44 @@ public final class GlassView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        // Claim the gesture on ACTION_DOWN if the touch lands on the
-        // settings icon, otherwise return false so the framework can
-        // route the event to other potential consumers. Without the
-        // ACTION_DOWN claim, the framework stops delivering
-        // subsequent events (including ACTION_UP) to this view, so
-        // the tap would never fire.
+        // Always feed the detectors (they have side effects / state).
+        // We use them to implement the "simple gesture" part of the
+        // zoom feature (pinch + double-tap) without letting the map
+        // receive stray single-finger drags (which would pan it).
+        gestureDetector.onTouchEvent(event);
+        scaleDetector.onTouchEvent(event);
+
         boolean inIcon = settingsIconRect.contains(event.getX(), event.getY());
-        switch (event.getAction()) {
-            case MotionEvent.ACTION_DOWN:
-                return inIcon;
-            case MotionEvent.ACTION_UP:
-                if (inIcon && onSettingsTapListener != null) {
-                    onSettingsTapListener.run();
-                }
-                return inIcon;
-            default:
-                return super.onTouchEvent(event);
+        if (inIcon) {
+            // Existing gear logic unchanged.
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (onSettingsTapListener != null) {
+                        onSettingsTapListener.run();
+                    }
+                    return true;
+                default:
+                    return super.onTouchEvent(event);
+            }
         }
+
+        // Non-gear touch.
+        if (event.getPointerCount() >= 2) {
+            // Multi-finger: this is a pinch/zoom gesture for the map.
+            // Forward the raw events so osmdroid (with multiTouchControls
+            // enabled) can handle the scale internally and fire ZoomEvents.
+            if (mapViewForZoom != null) {
+                mapViewForZoom.dispatchTouchEvent(event);
+            }
+            return true;
+        }
+
+        // Single-finger non-gear: swallow so the map never pans.
+        // Double-tap (a simple gesture) was already handled by the
+        // GestureDetector above, which called zoomIn() if appropriate.
+        return true;
     }
 
     private static String formatValue(double v, String fmt) {
