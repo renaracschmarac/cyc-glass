@@ -30,6 +30,15 @@ android {
                 ?: System.getenv("MAP_TILE_API_KEY")
                 ?: "").toString()
         buildConfigField "String", "MAP_TILE_API_KEY", "\"${mapTileApiKey}\""
+
+        // Compile-time flag for verbose GPS/BLE location logging (lat/lon etc).
+        // Default OFF for release/privacy. Enable via local.properties or env for debugging:
+        // e.g. in local.properties: DEBUG_LOG_LOCATION=true
+        // Or gradle -PDEBUG_LOG_LOCATION=true
+        def debugLogLocation = (project.findProperty("DEBUG_LOG_LOCATION")
+                ?: System.getenv("DEBUG_LOG_LOCATION")
+                ?: "false").toString().toBoolean()
+        buildConfigField "boolean", "DEBUG_LOG_LOCATION", "${debugLogLocation}"
     }
 
     buildFeatures {

@@ -73,6 +73,12 @@ public final class LocationProvider {
     private static final long FASTEST_INTERVAL_MS = 500L;
     private static final float DISPLACEMENT_M = 5.0f;
 
+    // Rolling debug log buffer (last 1000 entries) for any GPS/BLE debug data ingestion needs.
+    // Populated only when DEBUG_LOG_LOCATION flag is enabled at build time.
+    // Access via getRecentDebugLogs() if needed (e.g. for support dump). Constrained to prevent unbounded growth.
+    private static final java.util.List<String> recentDebugLogs =
+            java.util.Collections.synchronizedList(new java.util.LinkedList<>());
+
     private final Context appContext;
     private final FusedLocationProviderClient fused;
     private final CopyOnWriteArrayList<Listener> listeners =
@@ -93,10 +99,22 @@ public final class LocationProvider {
             float mps = loc.hasSpeed() ? loc.getSpeed() : 0.0f;
             lastFix = point;
             lastFixMs = ms;
-            Log.d(TAG, "fix lat=" + loc.getLatitude()
-                    + " lon=" + loc.getLongitude()
-                    + " acc=" + loc.getAccuracy() + "m"
-                    + " speed=" + mps + "m/s");
+            // Detailed lat/lon/speed logging is OFF by default (per user feedback for privacy/release).
+            // Enable at compile time via -PDEBUG_LOG_LOCATION=true or local.properties for debugging only.
+            // If data ingestion logging is ever needed, consider a bounded rolling buffer (e.g. last 1000 entries)
+            // instead of unbounded spammy logs. Currently, onFix() itself provides the data feed to listeners.
+            if (BuildConfig.DEBUG_LOG_LOCATION) {
+                String logMsg = "fix lat=" + loc.getLatitude()
+                        + " lon=" + loc.getLongitude()
+                        + " acc=" + loc.getAccuracy() + "m"
+                        + " speed=" + mps + "m/s";
+                Log.d(TAG, logMsg);
+                // Maintain rolling buffer of last 1000 debug entries (for data ingestion/debug support if needed).
+                recentDebugLogs.add(logMsg);
+                while (recentDebugLogs.size() > 1000) {
+                    recentDebugLogs.remove(0);
+                }
+            }
             for (Listener l : listeners) l.onFix(point, ms, mps);
         }
     };
@@ -124,6 +142,14 @@ public final class LocationProvider {
 
     public long lastFixMs() {
         return lastFixMs;
+    }
+
+    /** Returns a copy of the last up to 1000 debug log entries (only populated if DEBUG_LOG_LOCATION build flag enabled).
+     *  Useful for support/diagnostics without unbounded logging. */
+    public static java.util.List<String> getRecentDebugLogs() {
+        synchronized (recentDebugLogs) {
+            return new java.util.ArrayList<>(recentDebugLogs);
+        }
     }
 
     public boolean hasFineLocationPermission() {

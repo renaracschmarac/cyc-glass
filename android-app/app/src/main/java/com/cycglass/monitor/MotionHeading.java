@@ -143,9 +143,12 @@ public final class MotionHeading {
     private void noteSource(boolean nowUsingGps) {
         if (nowUsingGps == usingGps) return;
         usingGps = nowUsingGps;
-        Log.i(TAG, nowUsingGps
-                ? "switching to GPS bearing (speed ≥ 2 m/s)"
-                : "switching to rotation vector (speed < 2 m/s)");
+        // Gate behind compile-time debug flag (tied to GPS/BLE logging). Off by default.
+        if (BuildConfig.DEBUG_LOG_LOCATION) {
+            Log.i(TAG, nowUsingGps
+                    ? "switching to GPS bearing (speed ≥ 2 m/s)"
+                    : "switching to rotation vector (speed < 2 m/s)");
+        }
     }
 
     /**

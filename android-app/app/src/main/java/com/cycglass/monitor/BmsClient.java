@@ -91,6 +91,11 @@ public final class BmsClient {
     private boolean validated;
     private boolean scanning;
 
+    /** True if this scan session was started because there was no cached address (new install or after clear).
+     *  Used to give the first seen candidate a shorter selection delay so the "scan then cache MAC" flow
+     *  succeeds more reliably on first launch without the user having to manually rescan. */
+    private boolean isInitialDiscovery = false;
+
     private final Runnable resolveScan = this::chooseDevice;
     private final Runnable rejectTimeout = () -> {
         if (!validated && gatt != null) {
@@ -191,12 +196,42 @@ public final class BmsClient {
             host.setStatus("BLE scanner unavailable");
             return;
         }
+        if (scanning) {
+            scanner.stopScan(scanCallback);
+            scanning = false;
+        }
         found.clear();
         selectingDevice = false;
         handler.removeCallbacks(resolveScan);
-        host.setStatus("Scanning for BMS");
+        isInitialDiscovery = (preferences.getString(KEY_ADDRESS, null) == null);
+        if (isInitialDiscovery) {
+            host.setStatus("Scanning for battery — power on the bike if not already");
+        } else {
+            host.setStatus("Scanning for BMS");
+        }
         scanning = true;
         scanner.startScan(scanCallback);
+    }
+
+    @SuppressWarnings("MissingPermission")
+    private void tryAggressiveReconnect() {
+        // Aggressive persistent reconnect logic (user requirement for riding: keep trying without dying or user action).
+        // Prefer direct connect to saved/remembered device (bypass scan for speed). Short backoff if needed.
+        // Only fall back to scan if no saved address. Will keep retrying on future disconnects.
+        String saved = preferences.getString(KEY_ADDRESS, null);
+        if (saved != null) {
+            try {
+                BluetoothDevice device = host.adapter().getRemoteDevice(saved);
+                host.setStatus("Reconnecting directly (aggressive)");
+                connectDevice(device);
+                return;
+            } catch (IllegalArgumentException e) {
+                // Bad saved addr, clear and scan
+                preferences.edit().remove(KEY_ADDRESS).remove(KEY_LABEL).apply();
+            }
+        }
+        // No saved or bad: fall back to scan (will remember on success)
+        handler.postDelayed(this::beginScan, 500);  // short delay for aggressive but not instant spam
     }
 
     @SuppressWarnings("MissingPermission")
@@ -243,10 +278,14 @@ public final class BmsClient {
         DiscoveredBms cand = found.get(device.getAddress());
         String label = cand == null ? device.getName() : cand.name;
         if (label == null) label = "Battery BMS";
+        // MAC addresses are runtime BluetoothDevice.getAddress() values only (never hardcoded in source or APK).
+        // Stored in device-local SharedPreferences (MODE_PRIVATE) -- acceptable per user (on phone, not in GH/APK).
+        // Cleared on rescan or bad addr.
         preferences.edit()
                 .putString(KEY_ADDRESS, device.getAddress())
                 .putString(KEY_LABEL, label)
                 .apply();
+        isInitialDiscovery = false;  // We successfully locked in and cached during this discovery session.
     }
 
     @SuppressWarnings("MissingPermission")
@@ -277,7 +316,15 @@ public final class BmsClient {
                 found.put(device.getAddress(), new DiscoveredBms(device, name, result.getRssi()));
                 host.setStatus("Found " + found.size() + " BMS candidate(s)");
                 handler.removeCallbacks(resolveScan);
-                handler.postDelayed(resolveScan, SCAN_SELECTION_DELAY_MS);
+                long delay = SCAN_SELECTION_DELAY_MS;
+                if (isInitialDiscovery && found.size() == 1) {
+                    // On a brand new install (or after rescan cleared the cached MAC), as soon as we see the
+                    // first candidate via the manufacturer mask (0x0104), use a shorter delay before attempting
+                    // to connect + validate. This makes the "scan first, then cache the MAC" flow succeed
+                    // more reliably and quickly on first launch without the user needing to manually hit Rescan.
+                    delay = 1000;
+                }
+                handler.postDelayed(resolveScan, delay);
             }
         }
     };
@@ -317,8 +364,11 @@ public final class BmsClient {
                 g.close();
                 gatt = null;
                 if (tryingRememberedDevice) tryingRememberedDevice = false;
-                host.setStatus("Disconnected - searching");
-                handler.postDelayed(() -> beginScan(), 1000);
+                host.setStatus("Disconnected - retrying aggressively");
+                // Aggressive reconnect for riding use case (per user): prefer direct reconnect to saved device
+                // without full scan/delay if we have a remembered address. Keep trying without user interaction.
+                // Falls back to scan only if no saved address. Short/no delay to stay connected.
+                handler.post(BmsClient.this::tryAggressiveReconnect);
             }
         }
 
