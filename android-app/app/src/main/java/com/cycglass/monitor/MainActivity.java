@@ -262,6 +262,11 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
         if (requestCode == REQUEST_BLUETOOTH) {
             if (allGranted(grantResults)) {
                 startBleClients();
+                // Chain location request here. On a clean first install
+                // this is what makes the "allow gps" dialog appear
+                // immediately after the user taps "Allow" on the nearby
+                // devices dialog -- no need to kill/restart the app.
+                ensureLocationPermission();
             } else {
                 view.setStatus("Bluetooth permission required");
             }
@@ -493,15 +498,23 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
     }
 
     private void startWhenPermitted() {
-        // Step 1: Bluetooth. On API 31+ that's BLUETOOTH_SCAN/CONNECT;
-        // on older releases it's ACCESS_FINE_LOCATION (the historical
-        // BLE-scan permission).
+        // Step 1: Bluetooth (nearby devices). On API 31+ (S+) that's
+        // BLUETOOTH_SCAN/CONNECT (manifest has neverForLocation so it
+        // does not imply GPS). On older it's the historical FINE_LOCATION.
+        // IMPORTANT: we request BT *first* and only proceed to location
+        // request *after* the BT result (or if BT was already granted).
+        // Requesting both back-to-back in one pass on first install
+        // causes the second (location/GPS) request to be lost; the
+        // dialog never appears until activity restart. See onRequest
+        // and ensureLocationPermission.
+        boolean requestedBluetooth = false;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED
                     || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(
                         new String[] {Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT},
                         REQUEST_BLUETOOTH);
+                requestedBluetooth = true;
             } else {
                 startBleClients();
             }
@@ -513,18 +526,31 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
                 requestPermissions(
                         new String[] {Manifest.permission.ACCESS_FINE_LOCATION},
                         REQUEST_BLUETOOTH);
+                requestedBluetooth = true;
             } else {
                 startBleClients();
-                // Same permission covers map GPS too; the LocationProvider
-                // will start via the permission-already-granted branch
-                // when onResume fires.
             }
         }
 
-        // Step 2: Location. On API 23+ ACCESS_FINE_LOCATION is
-        // runtime; request it for the map regardless of BLE state.
-        // On API 31+ it's separate from BLUETOOTH_*; the
-        // pre-S single-permission path above already covered it.
+        if (!requestedBluetooth) {
+            // BT perms were already granted at launch time (typical
+            // after first run or restart). Safe to request location now.
+            ensureLocationPermission();
+        }
+        // If we *did* request BT, the location request is chained from
+        // onRequestPermissionsResult for REQUEST_BLUETOOTH (after user
+        // grants nearby, we immediately request GPS so the "allow gps"
+        // prompt appears on the *first* launch, no kill/restart needed).
+    }
+
+    // Note: onRequestPermissionsResult for REQUEST_BLUETOOTH now calls
+    // ensureLocationPermission() on success (see that method). This is
+    // the key to the first-load GPS prompt fix.
+
+    private void ensureLocationPermission() {
+        // Location (for map/GPS). On S+ this is separate from the BT
+        // "nearby" perms (even with neverForLocation). Called either
+        // immediately (if BT already ok) or from the BT grant result.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ContextCompat.checkSelfPermission(this,
                     Manifest.permission.ACCESS_FINE_LOCATION)
@@ -539,10 +565,8 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
                 if (locationProvider != null) locationProvider.onPermissionResult(true);
             }
         } else {
-            // Pre-S: ACCESS_FINE_LOCATION was already requested above
-            // (under the BLE permission code path). If the user
-            // granted it for BLE, we already started the BLE clients;
-            // the locationProvider will pick it up on onResume.
+            // Pre-S: ACCESS_FINE_LOCATION (requested under BT code or
+            // already held) also covers map GPS.
             if (ContextCompat.checkSelfPermission(this,
                     Manifest.permission.ACCESS_FINE_LOCATION)
                     == PackageManager.PERMISSION_GRANTED) {
