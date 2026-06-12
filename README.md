@@ -124,13 +124,54 @@ The two extras are independent. Both default to 200 ms (5 Hz per
 peripheral). Set them to identical values for a 10 Hz combined refresh,
 or stagger them as in production.
 
+### Verification after `adb install` (device + logs)
+
+Work from the repo root. After building and deploying:
+
+```bash
+adb install -r android-app/app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n com.cycglass.monitor/.MainActivity
+```
+
+Monitor behavior (map network init, BLE attempts to the two remembered
+peripherals, GPS):
+
+```bash
+adb logcat | grep -E 'ycglass|OsmDroid|BluetoothGatt|LocationProvider|BmsClient|CycClient'
+```
+
+Observed during testing (phone app launches, requests the two stored
+addresses via GATT, falls back to scanning + shows location fixes and
+OsmDroid/Mapnik tile loading when devices are out of range).
+
+### Running tests from repo root
+
+Unit tests (no hardware):
+
+```bash
+(cd android-app && ./gradlew --no-daemon testDebugUnitTest)
+```
+
+Python cross-check (no hardware):
+
+```bash
+python3 scripts/eval_decoder.py
+```
+
+Short or full dual-connection soak test (requires powered hardware + sibling
+blu-battery / cygnus-bike checkouts with their .venvs):
+
+```bash
+BMS_ADDRESS=xx:xx:xx:xx:xx:xx CYCMOTOR_ADDRESS=yy:yy:yy:yy:yy:yy \
+    python3 scripts/soak_test.py --seconds 300
+```
+
 ## Tests
 
 ### Unit tests (no hardware required)
 
 ```bash
-cd android-app
-gradle --no-daemon testDebugUnitTest
+(cd android-app && ./gradlew --no-daemon testDebugUnitTest)
 ```
 
 Three test classes cover the full decode chain:

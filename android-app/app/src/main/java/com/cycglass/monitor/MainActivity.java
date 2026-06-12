@@ -122,11 +122,9 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
             layout = null;
         }
 
-        view = new GlassView(this, model, ampsOut, ampsIn);
-
-        // Map is created in createContentView() and lives BEHIND the
-        // GlassView in the FrameLayout. Set its tile source before
-        // attaching to the layout.
+        // Map first (it is the backdrop), then GlassView on top.
+        // We immediately give the map reference to GlassView so it can
+        // forward zoom gestures (pinch + double-tap).
         mapView = new MapBackgroundView(this);
         if (tileSource != null) {
             mapView.setTileSource(tileSource.tileSource());
@@ -136,6 +134,9 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
                 600L * 1024L * 1024L);
         mapView.setHorizontalMapRepetitionEnabled(false);
         mapView.setVerticalMapRepetitionEnabled(false);
+
+        view = new GlassView(this, model, ampsOut, ampsIn);
+        view.setMapViewForZoom(mapView);
 
         setContentView(createContentView());
         hideSystemUi();
@@ -290,6 +291,25 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
         root.addView(view, glassParams);
+
+        // Zoom controls THIRD (on top of everything, in the "map region").
+        // Bottom-right, semi-transparent rounded container with + over -,
+        // classic Google/OSM look, implemented with GradientDrawable so
+        // we don't need extra drawable resources.
+        View zoomControls = createMapZoomControls();
+        FrameLayout.LayoutParams zoomLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        zoomLp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.END;
+        zoomLp.rightMargin = dp(16);
+        // Shifted higher (~1/2" = ~80dp more margin) so the +/- controls
+        // sit above the bottom black perimeter data bar (the "black bar"
+        // region containing battery/CYC telemetry at the bottom of the UI).
+        // Original 44dp only cleared the status line; now avoids overlapping
+        // the dark bottom row entirely.
+        zoomLp.bottomMargin = dp(124);
+        root.addView(zoomControls, zoomLp);
+
         // The settings gear is drawn directly inside the GlassView's
         // own onDraw (see GlassView.drawSettingsIcon), so a sibling
         // ImageButton isn't needed — the previous sibling-View path
@@ -583,6 +603,64 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    // --- Map zoom controls (the +/- buttons requested for the map region) ---
+
+    /**
+     * Creates the on-screen +/- zoom control that lives in the map region.
+     * Uses a vertical LinearLayout with a semi-transparent rounded black
+     * background (GradientDrawable) containing two simple text buttons.
+     * This produces the classic compact, transparent map zoom UI without
+     * requiring any new drawable resource files.
+     */
+    private View createMapZoomControls() {
+        android.widget.LinearLayout container = new android.widget.LinearLayout(this);
+        container.setOrientation(android.widget.LinearLayout.VERTICAL);
+
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        bg.setColor(0x66000000); // ~40% opaque black — transparent map-like
+        bg.setCornerRadius(dp(6));
+        container.setBackground(bg);
+        container.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        android.widget.Button plus = makeZoomButton("+");
+        plus.setOnClickListener(v -> {
+            if (mapView != null) mapView.zoomIn();
+        });
+        android.widget.Button minus = makeZoomButton("-");
+        minus.setOnClickListener(v -> {
+            if (mapView != null) mapView.zoomOut();
+        });
+
+        container.addView(plus);
+        // Thin separator for the grouped +/- look (common in OSM/Google controls)
+        android.view.View sep = new android.view.View(this);
+        sep.setBackgroundColor(0x33FFFFFF);
+        android.widget.LinearLayout.LayoutParams sepLp =
+                new android.widget.LinearLayout.LayoutParams(dp(22), dp(1));
+        sepLp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+        sepLp.topMargin = dp(1);
+        sepLp.bottomMargin = dp(1);
+        container.addView(sep, sepLp);
+        container.addView(minus);
+
+        return container;
+    }
+
+    private android.widget.Button makeZoomButton(String label) {
+        android.widget.Button b = new android.widget.Button(this);
+        b.setText(label);
+        b.setTextSize(22);
+        b.setTextColor(android.graphics.Color.WHITE);
+        b.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        b.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+        b.setPadding(dp(6), dp(2), dp(6), dp(2));
+        b.setMinWidth(dp(40));
+        b.setMinHeight(dp(36));
+        b.setGravity(android.view.Gravity.CENTER);
+        return b;
     }
 
     private void hideSystemUi() {
