@@ -241,3 +241,15 @@ Ready for commit/PR on the branch if desired (or further tweaks).
 This bug is now fixed and verified on the plugged phone. Ready to commit alongside prior changes on the branch for PR.
 
 **All current + prior todos complete + phone verified.**
+
+## PR merged + local cleanup (2026-06-11)
+
+- PR #3 (https://github.com/renaracschmarac/cyc-glass/pull/3) merged into main (merge commit 7b0840d).
+- Local cleanup from project root:
+  - `git checkout main`
+  - `git pull --ff-only origin main` (fast-forward brought zoom + GPS prompt fix + review items: logging flag/buffer, aggressive reconnect, comments).
+  - `git branch -d feat/map-zoom-controls`
+  - `git fetch --prune`
+- Current: on `main`, up-to-date with `origin/main`.
+- Only untracked: `screenshots/` (as in prior sessions; verification images left out of commits).
+- Session complete. All bugs from SR review + follow-up GPS prompt issue addressed + phone-verified. Workspace ready for next work.
