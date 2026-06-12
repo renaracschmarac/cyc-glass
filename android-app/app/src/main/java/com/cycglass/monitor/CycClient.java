@@ -89,6 +89,11 @@ public final class CycClient {
     private boolean validated;
     private boolean scanning;
 
+    /** True if this scan session was started because there was no cached address (new install or after clear).
+     *  Used to give the first seen candidate a shorter selection delay so the "scan then cache the MAC" flow
+     *  succeeds more reliably on first launch. */
+    private boolean isInitialDiscovery = false;
+
     private final Runnable resolveScan = this::chooseDevice;
     private final Runnable rejectTimeout = () -> {
         if (!validated && gatt != null) reject("No valid CYC telemetry");
@@ -195,12 +200,40 @@ public final class CycClient {
             host.setStatus("BLE scanner unavailable");
             return;
         }
+        if (scanning) {
+            scanner.stopScan(scanCallback);
+            scanning = false;
+        }
         found.clear();
         selectingDevice = false;
         handler.removeCallbacks(resolveScan);
-        host.setStatus("Scanning for motor");
+        isInitialDiscovery = (preferences.getString(KEY_MOTOR_ADDRESS, null) == null);
+        if (isInitialDiscovery) {
+            host.setStatus("Scanning for motor — power on the bike if not already");
+        } else {
+            host.setStatus("Scanning for motor");
+        }
         scanning = true;
         scanner.startScan(scanCallback);
+    }
+
+    @SuppressWarnings("MissingPermission")
+    private void tryAggressiveReconnect() {
+        // Aggressive persistent reconnect logic (user requirement for riding: keep trying without dying or user action).
+        // Prefer direct connect to saved/remembered device (bypass scan for speed). Short backoff if needed.
+        // Only fall back to scan if no saved address. Will keep retrying on future disconnects.
+        String saved = preferences.getString(KEY_MOTOR_ADDRESS, null);
+        if (saved != null) {
+            try {
+                BluetoothDevice device = host.adapter().getRemoteDevice(saved);
+                host.setStatus("Reconnecting directly (aggressive)");
+                connectDevice(device);
+                return;
+            } catch (IllegalArgumentException e) {
+                preferences.edit().remove(KEY_MOTOR_ADDRESS).remove(KEY_MOTOR_LABEL).apply();
+            }
+        }
+        handler.postDelayed(this::beginScan, 500);  // short delay for aggressive but not instant spam
     }
 
     @SuppressWarnings("MissingPermission")
@@ -244,10 +277,14 @@ public final class CycClient {
         DiscoveredMotor cand = found.get(device.getAddress());
         String label = cand == null ? device.getName() : cand.name;
         if (label == null) label = DEVICE_NAME;
+        // MAC addresses are runtime BluetoothDevice.getAddress() values only (never hardcoded in source or APK).
+        // Stored in device-local SharedPreferences (MODE_PRIVATE) -- acceptable per user (on phone, not in GH/APK).
+        // Cleared on rescan or bad addr.
         preferences.edit()
                 .putString(KEY_MOTOR_ADDRESS, device.getAddress())
                 .putString(KEY_MOTOR_LABEL, label)
                 .apply();
+        isInitialDiscovery = false;
     }
 
     @SuppressWarnings("MissingPermission")
@@ -281,7 +318,13 @@ public final class CycClient {
                 found.put(device.getAddress(), new DiscoveredMotor(device, name, result.getRssi()));
                 host.setStatus("Found " + found.size() + " motor candidate(s)");
                 handler.removeCallbacks(resolveScan);
-                handler.postDelayed(resolveScan, SCAN_SELECTION_DELAY_MS);
+                long delay = SCAN_SELECTION_DELAY_MS;
+                if (isInitialDiscovery && found.size() == 1) {
+                    // Same improvement as BmsClient: on new install (no cached motor address), when the first
+                    // "CYCMOTOR" name match appears, use shorter delay before trying to connect+validate+cache.
+                    delay = 1000;
+                }
+                handler.postDelayed(resolveScan, delay);
             }
         }
     };
@@ -302,8 +345,9 @@ public final class CycClient {
                 g.close();
                 gatt = null;
                 if (tryingRememberedDevice) tryingRememberedDevice = false;
-                host.setStatus("Motor disconnected - searching");
-                handler.postDelayed(() -> beginScan(), 1000);
+                host.setStatus("Motor disconnected - retrying aggressively");
+                // Aggressive persistent reconnect logic (user requirement for riding: keep trying without dying or user action).
+                handler.post(CycClient.this::tryAggressiveReconnect);
             }
         }
 
