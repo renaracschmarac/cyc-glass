@@ -222,12 +222,21 @@ public final class MapBackgroundView extends MapView {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        // Swallow all touches — the GlassView on top owns the gesture.
+        // Allow multi-touch events (pinch zoom) to be processed by the
+        // superclass / osmdroid (when multiTouchControls is enabled).
+        // Single-touch is still swallowed to prevent any user panning
+        // of the GPS-centered backdrop.
+        if (event.getPointerCount() > 1) {
+            return super.onTouchEvent(event);
+        }
         return true;
     }
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getPointerCount() > 1) {
+            return super.dispatchTouchEvent(event);
+        }
         return true;
     }
 

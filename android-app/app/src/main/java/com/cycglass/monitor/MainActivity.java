@@ -302,7 +302,12 @@ public final class MainActivity extends Activity implements BmsClient.Host, CycC
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         zoomLp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.END;
         zoomLp.rightMargin = dp(16);
-        zoomLp.bottomMargin = dp(44); // clear the bottom status line
+        // Shifted higher (~1/2" = ~80dp more margin) so the +/- controls
+        // sit above the bottom black perimeter data bar (the "black bar"
+        // region containing battery/CYC telemetry at the bottom of the UI).
+        // Original 44dp only cleared the status line; now avoids overlapping
+        // the dark bottom row entirely.
+        zoomLp.bottomMargin = dp(124);
         root.addView(zoomControls, zoomLp);
 
         // The settings gear is drawn directly inside the GlassView's
