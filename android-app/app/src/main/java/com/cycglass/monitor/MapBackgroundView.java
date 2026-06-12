@@ -27,22 +27,26 @@ import org.osmdroid.events.ZoomEvent;
  * <p>Behavior:
  *
  * <ul>
- *   <li>Zoom is supported via on-screen +/- buttons (styled like
- *       classic transparent OSM/Google map controls) and simple
- *       gestures (pinch-to-zoom + double-tap). See GlassView and
- *       MainActivity for the input routing.</li>
- *   <li>No user panning — single-touch drags are swallowed so the map
- *       stays strictly GPS-centered (and heading-rotated).</li>
+ *   <li>Zoom level (scale) is user-controllable via on-screen +/-
+ *       buttons (styled like classic transparent OSM/Google map
+ *       controls) and simple gestures (pinch-to-zoom + double-tap).
+ *       See GlassView and MainActivity.</li>
+ *   <li>The map is *always* kept centered on the current GPS location,
+ *       no matter what zoom the user chooses. Any attempt to shift the
+ *       center (via gesture, scroll, etc.) is immediately corrected.
+ *       Single-touch drags are swallowed to block panning. This is the
+ *       core "keep centered on the GPS location, regardless of zoom"
+ *       requirement.</li>
  *   <li>Default/initial scale: screen width ≈ 1000 ft (304.8 m). This
  *       is applied only until the user manually zooms; after that the
  *       user's chosen zoom level is preserved (including across
- *       rotations).</li>
+ *       rotations) while the center continues to follow GPS.</li>
  *   <li>Initial center is set via {@link #setInitialCenter(GeoPoint)};
  *       until that happens we render a solid black background
  *       (no tiles, no centered text).</li>
- *   <li>Subsequent updates come from {@link #recenterTo(GeoPoint)};
- *       the map smoothly animates to the new center while preserving
- *       the current zoom level.</li>
+ *   <li>Subsequent GPS updates come from {@link #recenterTo(GeoPoint)};
+ *       the map smoothly animates the center to the new GPS fix while
+ *       preserving whatever zoom level the user has chosen.</li>
  * </ul>
  *
  * <p>See {@code docs/2026-06-01-map-background-plan.md} (original
@@ -68,6 +72,12 @@ public final class MapBackgroundView extends MapView {
     @Nullable private GeoPoint pendingCenter;
     private int lastZoomLevel = -1;
     private boolean userHasZoomed = false;
+
+    /** The last GPS location we were told to center on. We keep the map
+     *  strictly centered here at all times, even when the user changes
+     *  the zoom level via buttons or pinch. This enforces the core
+     *  "keep centered on the GPS location" requirement. */
+    @Nullable private GeoPoint currentGpsCenter;
 
     public MapBackgroundView(Context context) {
         super(context);
@@ -97,12 +107,14 @@ public final class MapBackgroundView extends MapView {
         blackFill.setStyle(Paint.Style.FILL);
 
         // Multi-touch (pinch) is enabled so forwarded gestures from
-        // GlassView can drive zoom. We still provide our own +/- buttons
-        // (see MainActivity) for the classic transparent map UI look.
-        // Built-in controls and all other "interactive map" affordances
-        // remain disabled — this is still fundamentally a GPS-centered
-        // backdrop.
-        setMultiTouchControls(true);
+        // User-controlled zoom (buttons + pinch handled in GlassView) is
+        // supported, but we keep multi-touch controls *off* on the map
+        // itself so that the internal gesture cannot shift the center
+        // away from GPS. All zoom is applied explicitly, followed by an
+        // immediate setCenter(currentGpsCenter). Single-touch is swallowed
+        // to block panning. This strictly protects "always centered on
+        // the GPS location, regardless of zoom level".
+        setMultiTouchControls(false);
         setBuiltInZoomControls(false);
         setHorizontalMapRepetitionEnabled(false);
         setVerticalMapRepetitionEnabled(false);
@@ -114,21 +126,28 @@ public final class MapBackgroundView extends MapView {
         // own background and the black-fill branch never shows.
         setBackgroundColor(Color.TRANSPARENT);
 
-        // Single-touch drags are still swallowed (no user pan). Multi-
-        // touch and double-tap events are selectively forwarded by
-        // GlassView. The clickable/focusable flags keep the view from
-        // stealing focus from the HUD.
+        // Single-touch drags are swallowed (no user pan). The clickable/
+        // focusable flags keep the view from stealing focus from the HUD.
         setClickable(false);
         setFocusable(false);
 
-        // Listen for any zoom changes (from forwarded pinch, double-tap,
-        // or our own +/- buttons) so we can remember the user's choice
-        // and stop forcing the 1000-ft default scale on rotation etc.
+        // Listen for zoom/scroll so we can (a) remember the user's zoom
+        // choice and (b) *immediately* snap the center back to the last
+        // known GPS location. This is the key protection for the
+        // "keep centered on GPS regardless of zoom" requirement.
         addMapListener(new MapListener() {
-            @Override public boolean onScroll(ScrollEvent event) { return false; }
+            @Override public boolean onScroll(ScrollEvent event) {
+                if (currentGpsCenter != null) {
+                    getController().setCenter(currentGpsCenter);
+                }
+                return false;
+            }
             @Override public boolean onZoom(ZoomEvent event) {
                 lastZoomLevel = (int) Math.round(event.getZoomLevel());
                 userHasZoomed = true;
+                if (currentGpsCenter != null) {
+                    getController().setCenter(currentGpsCenter);
+                }
                 return false;
             }
         });
@@ -151,20 +170,47 @@ public final class MapBackgroundView extends MapView {
     }
 
     /**
-     * Zoom in one level using the controller. The MapListener registered
-     * in configure() will observe the ZoomEvent and set userHasZoomed.
-     * Safe to call from UI thread (buttons, gesture callbacks).
+     * Zoom in one level. After the zoom we *immediately* force the center
+     * back to the last known GPS location (if any). This, together with
+     * the MapListener and GlassView's explicit handling, guarantees the
+     * map stays centered on GPS no matter what the user does with zoom.
      */
     public void zoomIn() {
         getController().zoomIn();
+        if (currentGpsCenter != null) {
+            getController().setCenter(currentGpsCenter);
+        }
+        lastZoomLevel = (int) Math.round(getZoomLevelDouble());
+        userHasZoomed = true;
     }
 
     /**
-     * Zoom out one level using the controller. The MapListener registered
-     * in configure() will observe the ZoomEvent and set userHasZoomed.
+     * Zoom out one level, then force center back to GPS (see zoomIn).
      */
     public void zoomOut() {
         getController().zoomOut();
+        if (currentGpsCenter != null) {
+            getController().setCenter(currentGpsCenter);
+        }
+        lastZoomLevel = (int) Math.round(getZoomLevelDouble());
+        userHasZoomed = true;
+    }
+
+    /**
+     * Sets an arbitrary zoom level and *immediately* forces the center
+     * back to the last known GPS location. Used by the pinch gesture
+     * handler in GlassView so that pinch always scales the map *around*
+     * the GPS position on screen (the blue marker stays fixed in the
+     * middle of the view). This is the core of the "keep centered on
+     * GPS location, regardless of zoom" guarantee.
+     */
+    public void setZoomLevel(double zoomLevel) {
+        getController().setZoom(zoomLevel);
+        lastZoomLevel = (int) Math.round(zoomLevel);
+        userHasZoomed = true;
+        if (currentGpsCenter != null) {
+            getController().setCenter(currentGpsCenter);
+        }
     }
 
     /**
@@ -176,6 +222,7 @@ public final class MapBackgroundView extends MapView {
      */
     public void recenterTo(GeoPoint point) {
         if (point == null) return;
+        currentGpsCenter = point;   // always remember the authoritative GPS center
         Handler main = new Handler(Looper.getMainLooper());
         main.post(() -> {
             if (pendingCenter == null) {
@@ -217,6 +264,9 @@ public final class MapBackgroundView extends MapView {
             // Keep the user's zoom level explicitly (rotation can
             // sometimes reset internal state in the view).
             getController().setZoom(lastZoomLevel);
+            if (currentGpsCenter != null) {
+                getController().setCenter(currentGpsCenter);
+            }
         }
     }
 

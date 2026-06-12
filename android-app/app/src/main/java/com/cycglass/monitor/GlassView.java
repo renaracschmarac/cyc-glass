@@ -131,10 +131,19 @@ public final class GlassView extends View {
             }
         });
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            // We don't need to react here — we forward the raw multi-touch
-            // events to the MapView (which has setMultiTouchControls(true))
-            // so osmdroid's internal ScaleGestureDetector does the zoom.
-            // Keeping the detector is harmless and makes the code symmetric.
+            @Override
+            public boolean onScale(ScaleGestureDetector detector) {
+                if (mapViewForZoom != null) {
+                    double current = mapViewForZoom.getZoomLevelDouble();
+                    double newZoom = current * detector.getScaleFactor();
+                    // Drive the zoom explicitly through our helper. This
+                    // applies the new scale *and* forces the center back
+                    // to the current GPS location, so the map always
+                    // stays centered on GPS no matter how the user pinches.
+                    mapViewForZoom.setZoomLevel(newZoom);
+                }
+                return true;
+            }
         });
 
         setContentDescription(buildDescription());
@@ -649,18 +658,17 @@ public final class GlassView extends View {
 
         // Non-gear touch.
         if (event.getPointerCount() >= 2) {
-            // Multi-finger: this is a pinch/zoom gesture for the map.
-            // Forward the raw events so osmdroid (with multiTouchControls
-            // enabled) can handle the scale internally and fire ZoomEvents.
-            if (mapViewForZoom != null) {
-                mapViewForZoom.dispatchTouchEvent(event);
-            }
+            // Multi-finger pinch: the ScaleGestureDetector (fed at the
+            // top of this method) will drive setZoomLevel on the map,
+            // which forces the center back to GPS. We just consume the
+            // event so it doesn't leak to anything else.
             return true;
         }
 
         // Single-finger non-gear: swallow so the map never pans.
         // Double-tap (a simple gesture) was already handled by the
-        // GestureDetector above, which called zoomIn() if appropriate.
+        // GestureDetector above, which calls zoomIn() (which now also
+        // forces center to GPS).
         return true;
     }
 
